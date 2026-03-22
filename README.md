@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="official-icon.png" alt="Vigil logo" width="270" height="400"/>
+<img src="official-icon.png" alt="Vigil logo" width="230" height="400"/>
 
 # Vigil
 
