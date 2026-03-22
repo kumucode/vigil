@@ -1,7 +1,6 @@
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/xbushin/vigil/main/assets/official-icon.png" alt="Vigil logo" width="72" height="72"/>
-TEST123
 
 # Vigil
 
