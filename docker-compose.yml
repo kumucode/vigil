@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Vigil — self-hosted Docker version tracker
+#
+#  Quick start:
+#    cp .env.example .env   # fill in Telegram credentials (optional)
+#    docker compose up -d
+#    open http://YOUR_SERVER_IP:3000
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Reverse proxy ─────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy   # wait for backend health check to pass
+      frontend:
+        condition: service_healthy   # wait for frontend nginx to be ready
+    networks:
+      - tracker
+
+  # ── React frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - tracker
+    # healthcheck is defined in the Dockerfile (uses curl)
+
+  # ── Flask backend API + scheduler ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - CHECK_INTERVAL_HOURS=${CHECK_INTERVAL_HOURS:-6}
+      - DATA_DIR=/data
+    volumes:
+      - tracker-data:/data
+    networks:
+      - tracker
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/api/health"]
+      interval: 20s      # check every 20 s
+      timeout: 10s       # give Flask time to respond
+      retries: 6         # up to 2 min of retries
+      start_period: 30s  # don't count failures in the first 30 s
+
+# ── Named volume (data survives container re-creates) ─────────────────────────
+volumes:
+  tracker-data:
+
+# ── Internal bridge network ───────────────────────────────────────────────────
+networks:
+  tracker:
+    driver: bridge
