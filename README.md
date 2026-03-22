@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/xbushin/vigil.git/main/assets/public/logo.svg" alt="Vigil logo" width="72" height="72"/>
+<img src="https://github.com/xbushin/vigil.git/main/assets/public/official-icon.png" alt="Vigil logo" width="72" height="72"/>
 
 # Vigil
 
