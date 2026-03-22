@@ -7,7 +7,7 @@ Versions follow [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.PATC
 
 ---
 
-## [v1.0] — 2025 — Initial public release
+## [v1.0] — 2026 — Initial public release
 
 This is the first public release of Vigil. The app is functional and
 has been used in real self-hosted environments, but consider it alpha:
