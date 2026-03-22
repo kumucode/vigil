@@ -4,7 +4,7 @@
 
 # Vigil
 
-** Never miss a Docker update again.**
+**Never miss a Docker update again.**
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
