@@ -270,9 +270,20 @@ npm run dev
 
 ---
 
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Compact View
+![Compact View](docs/screenshots/compact.png)
+
+### Settings
+![Settings](docs/screenshots/settings.png)
+
 ## Contributing & community
 
-Vigil started as a personal tool to solve a real itch — keeping track of 30+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
+Vigil started as a personal tool to solve a real itch — keeping track of 15+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
 
 **Ways to get involved:**
 
