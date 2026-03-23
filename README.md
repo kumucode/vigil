@@ -272,14 +272,23 @@ npm run dev
 
 ## Screenshots
 
-### Dashboard
-![Dashboard](docs/screenshots/dashboard.png)
+### Dashboard — Dark Mode
+![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
 
-### Compact View
-![Compact View](docs/screenshots/compact.png)
+### Dashboard — Light Mode
+![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
+
+### List View
+![List View](docs/screenshots/List-view.png)
+
+### Compact Table View
+![Table View](docs/screenshots/Table-view.png)
 
 ### Settings
-![Settings](docs/screenshots/settings.png)
+![Settings](docs/screenshots/Settings.png)
+
+### Telegram Notifications
+![Telegram](docs/screenshots/Telegram-menu.png)
 
 ## Contributing & community
 
