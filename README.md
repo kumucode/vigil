@@ -282,28 +282,6 @@ npm run dev
 
 ---
 
-## Screenshots
-
-### Dark Mode
-![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
-
-### Light Mode
-![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
-
-### List View
-![List View](docs/screenshots/List-view.png)
-
-### Settings
-![Settings](docs/screenshots/Settings.png)
-
-### Table View
-![Table View](docs/screenshots/Table-view.png)
-
-### Telegram
-![Telegram](docs/screenshots/Telegram-menu.png)
-
----
-
 ## Contributing & community
 
 Vigil started as a personal tool to solve a real itch — keeping track of 30+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
