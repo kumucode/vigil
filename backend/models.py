@@ -103,6 +103,9 @@ class TrackedApp(db.Model):
     install_path          = db.Column(db.String(500), nullable=True)
     container_id          = db.Column(db.String(100), nullable=True)  # e.g. "LXC 101" or "VM 105"
     app_url               = db.Column(db.String(500), nullable=True)  # e.g. "https://jellyfin.local"
+    host_id               = db.Column(db.Integer,     db.ForeignKey("hosts.id", ondelete="SET NULL"), nullable=True)
+    service_name          = db.Column(db.String(100), nullable=True)   # service name inside compose file
+    auto_update           = db.Column(db.String(20),  nullable=False, default="off")  # off/ask/auto/silent
 
     def to_dict(self):
         return {
@@ -133,6 +136,75 @@ class TrackedApp(db.Model):
             "install_path":          self.install_path or "",
             "container_id":          self.container_id or "",
             "app_url":               self.app_url or "",
+            "host_id":               self.host_id,
+            "service_name":          self.service_name or "",
+            "auto_update":           self.auto_update or "off",
+        }
+
+
+# ── Remote host (agent) ────────────────────────────────────────────────────────
+
+class Host(db.Model):
+    __tablename__ = "hosts"
+
+    id           = db.Column(db.Integer,     primary_key=True)
+    name         = db.Column(db.String(100), nullable=False)
+    ip           = db.Column(db.String(100), nullable=False)
+    port         = db.Column(db.Integer,     nullable=False, default=7777)
+    token_hash   = db.Column(db.String(200), nullable=False)   # bcrypt hash, never plaintext
+    allowed_base = db.Column(db.String(500), nullable=False, default="/home")
+    last_seen    = db.Column(db.String(40),  nullable=True)
+    status       = db.Column(db.String(20),  nullable=False, default="unknown")  # connected/unreachable/unknown
+    created_at   = db.Column(db.DateTime,    default=lambda: datetime.now(timezone.utc))
+
+    def check_token(self, token: str) -> bool:
+        import bcrypt
+        try:
+            return bcrypt.checkpw(token.encode(), self.token_hash.encode())
+        except Exception:
+            return False
+
+    def to_dict(self, include_token_hint=False):
+        return {
+            "id":           self.id,
+            "name":         self.name,
+            "ip":           self.ip,
+            "port":         self.port,
+            "allowed_base": self.allowed_base,
+            "last_seen":    self.last_seen,
+            "status":       self.status,
+            "created_at":   self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+# ── Update log ─────────────────────────────────────────────────────────────────
+
+class UpdateLog(db.Model):
+    __tablename__ = "update_log"
+
+    id             = db.Column(db.Integer,     primary_key=True)
+    app_id         = db.Column(db.Integer,     db.ForeignKey("tracked_apps.id", ondelete="CASCADE"), nullable=False)
+    timestamp      = db.Column(db.String(40),  nullable=False)
+    action         = db.Column(db.String(20),  nullable=False, default="update")  # update/revert
+    from_version   = db.Column(db.String(100), nullable=True)
+    to_version     = db.Column(db.String(100), nullable=True)
+    status         = db.Column(db.String(20),  nullable=False, default="success")  # success/failed/reverted
+    backup_path    = db.Column(db.String(500), nullable=True)
+    triggered_by   = db.Column(db.String(50),  nullable=False, default="user")  # user/schedule/telegram
+    error_message  = db.Column(db.Text,        nullable=True)
+
+    def to_dict(self):
+        return {
+            "id":           self.id,
+            "app_id":       self.app_id,
+            "timestamp":    self.timestamp,
+            "action":       self.action,
+            "from_version": self.from_version,
+            "to_version":   self.to_version,
+            "status":       self.status,
+            "backup_path":  self.backup_path,
+            "triggered_by": self.triggered_by,
+            "error_message":self.error_message,
         }
 
 

@@ -84,10 +84,12 @@ def create_app() -> Flask:
     from routes.auth     import bp as auth_bp
     from routes.apps     import bp as apps_bp
     from routes.settings import bp as settings_bp
+    from routes.hosts    import bp as hosts_bp
 
     flask_app.register_blueprint(auth_bp)
     flask_app.register_blueprint(apps_bp)
     flask_app.register_blueprint(settings_bp)
+    flask_app.register_blueprint(hosts_bp)
 
     return flask_app
 

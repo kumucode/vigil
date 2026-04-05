@@ -1203,7 +1203,7 @@ export default function App() {
   const [imageInput, setImageInput] = useState("");
   const [parsed, setParsed]         = useState(null);
   const [newVersion, setNewVersion] = useState("");
-  const [overData, setOverData]     = useState({category:"",custom_icon:"",version_source_url:"",notes:"",install_path:"",container_id:"",app_url:""});
+  const [overData, setOverData]     = useState({category:"",custom_icon:"",version_source_url:"",notes:"",install_path:"",container_id:"",app_url:"",host_id:"",service_name:"",auto_update:"off"});
   const [pendingIcon, setPendingIcon]   = useState(null);
   const [showInstallPath, setShowInstallPath] = useState(false);
   const [history, setHistory]           = useState([]);
@@ -1272,6 +1272,24 @@ export default function App() {
   const iconFileRef = useRef(null);
   const logoFileRef = useRef(null);
 
+  // Agents / hosts
+  const [hosts, setHosts]                   = useState([]);
+  const [hostModal, setHostModal]           = useState(null); // null | "add" | "edit" | "token"
+  const [activeHost, setActiveHost]         = useState(null);
+  const [hostWizardStep, setHostWizardStep] = useState(1);
+  const [hostForm, setHostForm]             = useState({name:"",ip:"",port:"7777",allowed_base:"/home"});
+  const [newToken, setNewToken]             = useState("");   // shown once after create/regen
+  const [hostTesting, setHostTesting]       = useState(false);
+  const [hostTestMsg, setHostTestMsg]       = useState("");
+  const [copiedCurl,  setCopiedCurl]        = useState(false);
+  const [copiedToken, setCopiedToken]       = useState(false);
+
+  // Update log / revert
+  const [logModal, setLogModal]             = useState(null); // null | app object
+  const [updateLogs, setUpdateLogs]         = useState([]);
+  const [revertModal, setRevertModal]       = useState(null); // null | log entry
+  const [updatingApp, setUpdatingApp]       = useState(null); // app_id being updated
+
   // ── API ───────────────────────────────────────────────────────────────────
   const api = useCallback(async (path, opts={}) => {
     const r = await fetch(`/api${path}`, {
@@ -1283,6 +1301,22 @@ export default function App() {
   }, []);
 
   const toast = (msg, type="success") => { setNotif({msg,type}); setTimeout(()=>setNotif(null),3500); };
+
+  // Clipboard helper — works on both HTTPS and plain HTTP (LAN installs)
+  const copyText = (text) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).catch(()=>{});
+    } else {
+      // Fallback for HTTP
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+  };
 
   // ── Auth bootstrap ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1340,6 +1374,10 @@ export default function App() {
     try { const d = await api("/health"); setScheduler(d.scheduler); } catch(_) {}
   }, [api]);
 
+  const loadHosts = useCallback(async () => {
+    try { const h = await api("/hosts"); setHosts(h); } catch(_) {}
+  }, [api]);
+
   const loadSettings = useCallback(async () => {
     try {
       const d = await api("/settings");
@@ -1376,7 +1414,7 @@ export default function App() {
       })();
       await loadApps();
       recategorizeExisting();  // backend handles it — no JS timing issues
-      loadHealth(); loadSettings();
+      loadHealth(); loadSettings(); loadHosts();
     })();
     // Poll health every 30s AND apps every 60s so UI stays current without F5
     const tHealth = setInterval(loadHealth, 30000);
@@ -1544,7 +1582,7 @@ export default function App() {
     setModal("override"); setActiveApp(app); setPendingIcon(null); setShowInstallPath(false);
     
     loadIconLib(); // fetch icon lists in background if not already loaded
-    setOverData({image:app.image||"",name:app.name||"",category:app.category||"uncategorized",custom_icon:app.custom_icon||"",version_source_url:app.version_source_url||"",notes:app.notes||"",install_path:app.install_path||"",container_id:app.container_id||"",app_url:app.app_url||""});
+    setOverData({image:app.image||"",name:app.name||"",category:app.category||"uncategorized",custom_icon:app.custom_icon||"",version_source_url:app.version_source_url||"",notes:app.notes||"",install_path:app.install_path||"",container_id:app.container_id||"",app_url:app.app_url||"",host_id:app.host_id||"",service_name:app.service_name||"",auto_update:app.auto_update||"off"});
   };
 
   // ── Icon library (fetched once, cached in ref) ────────────────────────────────
@@ -1656,6 +1694,9 @@ export default function App() {
         install_path: overData.install_path,
         container_id: overData.container_id,
         app_url: overData.app_url,
+        host_id: overData.host_id || null,
+        service_name: overData.service_name,
+        auto_update: overData.auto_update,
       };
       if (overData.image.trim() && overData.image.trim() !== activeApp.image) patch.image = overData.image.trim();
       if (overData.name.trim() && overData.name.trim() !== activeApp.name) patch.name = overData.name.trim();
@@ -1714,6 +1755,23 @@ export default function App() {
     setModal("history"); setActiveApp(app);
     try { setHistory(await api(`/apps/${app.id}/history`)); } catch { setHistory([]); }
   };
+  const triggerUpdate = async (app) => {
+    // If auto_update is "ask", confirm before proceeding
+    if (app.auto_update === "ask" || app.auto_update === "off") {
+      const confirmed = window.confirm(
+        `Update ${app.name}?\n\n${app.version} → ${app.latest_version}\n\nThis will update the compose file on the remote host and restart the service.`
+      );
+      if (!confirmed) return;
+    }
+    setUpdatingApp(app.id);
+    try {
+      const r = await api(`/apps/${app.id}/update`, {method:"POST"});
+      setApps(p=>p.map(a=>a.id===app.id?r.app:a));
+      toast(`✓ ${app.name} updated to ${r.to}`);
+    } catch(e) { toast(e.message||"Update failed","error"); }
+    setUpdatingApp(null);
+  };
+
   const removeApp = async id => {
     try { await api(`/apps/${id}`,{method:"DELETE"}); setApps(p=>p.filter(a=>a.id!==id)); toast("Removed","info"); }
     catch { toast("Failed","error"); }
@@ -1960,8 +2018,8 @@ export default function App() {
     .ma{display:flex;gap:9px;justify-content:flex-end;margin-top:18px}
 
     /* Settings tabs */
-    .stabs{display:flex;gap:2px;margin-bottom:18px;background:${C.card};padding:4px;border-radius:10px;flex-wrap:nowrap;overflow-x:auto}
-    .stab{flex:1;min-width:90px;padding:9px 8px;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;font-size:11px;font-weight:700;border-radius:8px;cursor:pointer;transition:all .18s;color:${C.muted};border:none;background:transparent;font-family:'Syne';line-height:1.5}
+    .stabs{display:flex;gap:4px;margin-bottom:18px;background:${C.card};padding:5px;border-radius:10px;flex-wrap:nowrap;overflow-x:auto}
+    .stab{flex:1;min-width:90px;padding:9px 12px;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;font-size:11px;font-weight:700;border-radius:8px;cursor:pointer;transition:all .18s;color:${C.muted};border:none;background:transparent;font-family:'Syne';line-height:1.5}
     .stab.on{background:${C.accent};color:#fff}
 
     /* Misc */
@@ -2167,6 +2225,25 @@ export default function App() {
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
           </svg>
         </button>
+        {/* Agent button — goes to Settings → Agents */}
+        <button className="btn btn-sm"
+          title={app.host_id ? "Agent connected — manage in Settings → Agents" : "Set up a remote agent"}
+          onClick={()=>{ setOpen(false); setModal("settings"); setSettingsTab("agents"); }}
+          style={{background:"transparent",border:"none",
+            color: app.host_id ? C.accent+"cc" : C.muted,
+            cursor:"pointer",padding:"4px 5px",
+            display:"flex",alignItems:"center",borderRadius:6,transition:"color .15s,background .15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.color=C.accent;e.currentTarget.style.background=C.accent+"14";}}
+          onMouseLeave={e=>{e.currentTarget.style.color=app.host_id?C.accent+"cc":C.muted;e.currentTarget.style.background="transparent";}}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="8" width="18" height="12" rx="2"/>
+            <circle cx="8.5" cy="13.5" r="1.5"/>
+            <circle cx="15.5" cy="13.5" r="1.5"/>
+            <path d="M9 17h6"/>
+            <path d="M12 8V4"/>
+            <circle cx="12" cy="3" r="1"/>
+          </svg>
+        </button>
         <button className="btn btn-sm" onClick={()=>removeApp(app.id)} title="Remove this app"
           style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",padding:"4px 5px",
             display:"flex",alignItems:"center",borderRadius:6,transition:"color .15s,background .15s"}}
@@ -2207,6 +2284,25 @@ export default function App() {
           }}>
           <BellIconToShow size={13}/>
         </button>
+        {/* History button — only shown when host is linked */}
+        {app.host_id && (
+          <button className="btn btn-sm"
+            title="Update history"
+            onClick={async()=>{
+              setOpen(false);
+              const logs = await api(`/apps/${app.id}/logs`);
+              setUpdateLogs(logs); setLogModal(app);
+            }}
+            style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",
+              padding:"4px 5px",display:"flex",alignItems:"center",borderRadius:6,
+              transition:"color .15s,background .15s"}}
+            onMouseEnter={e=>{e.currentTarget.style.color=C.accent;e.currentTarget.style.background=C.accent+"14";}}
+            onMouseLeave={e=>{e.currentTarget.style.color=C.muted;e.currentTarget.style.background="transparent";}}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+          </button>
+        )}
         <button ref={btnRef} className="btn btn-g btn-sm" onClick={()=>setOpen(o=>!o)} title="More options">⋯</button>
         {bellMenu}
         {menu}
@@ -2514,7 +2610,24 @@ export default function App() {
                   </div>
                   <div className="cf-foot">
                     <span/>
-                    <CardMenu key={app.id} app={app}/>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      {app.host_id && app.status==="outdated" && (
+                        <button onClick={()=>triggerUpdate(app)} disabled={updatingApp===app.id}
+                          title="Update to latest version"
+                          style={{background:"transparent",border:"none",cursor:"pointer",
+                            padding:"4px 5px",display:"flex",alignItems:"center",borderRadius:6,
+                            color:"#1D9E75",transition:"color .15s,background .15s",
+                            opacity:updatingApp===app.id?0.5:1}}
+                          onMouseEnter={e=>{e.currentTarget.style.color="#3ce08c";e.currentTarget.style.background="#1D9E7514";}}
+                          onMouseLeave={e=>{e.currentTarget.style.color="#1D9E75";e.currentTarget.style.background="transparent";}}>
+                          {updatingApp===app.id
+                            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+                          }
+                        </button>
+                      )}
+                      <CardMenu key={app.id} app={app}/>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2556,7 +2669,23 @@ export default function App() {
                   <span style={{width:6,height:6,borderRadius:"50%",background:sc,display:"inline-block"}}/>
                   {app.status==="up-to-date"?"OK":app.status==="pinned"?"pinned":app.status}
                 </span></div>
-                <div className="la"><CardMenu key={app.id} app={app}/></div>
+                <div className="la" style={{display:"flex",alignItems:"center",gap:4}}>
+                  {app.host_id && app.status==="outdated" && (
+                    <button onClick={()=>triggerUpdate(app)} disabled={updatingApp===app.id}
+                      title="Update to latest version"
+                      style={{background:"transparent",border:"none",cursor:"pointer",
+                        padding:"4px 5px",display:"flex",alignItems:"center",borderRadius:6,
+                        color:"#1D9E75",transition:"color .15s,background .15s",
+                        opacity:updatingApp===app.id?0.5:1}}
+                      onMouseEnter={e=>{e.currentTarget.style.color="#3ce08c";e.currentTarget.style.background="#1D9E7514";}}
+                      onMouseLeave={e=>{e.currentTarget.style.color="#1D9E75";e.currentTarget.style.background="transparent";}}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+                      </svg>
+                    </button>
+                  )}
+                  <CardMenu key={app.id} app={app}/>
+                </div>
               </div>
             );
           })}
@@ -2605,7 +2734,21 @@ export default function App() {
                     boxShadow:isOut?"0 0 5px #e05c5c88":isOK?"0 0 5px #3ce08c88":"none"}}/>
                   <span style={{color:sc}}>{isOK?"OK":app.status==="pinned"?"pinned":app.status}</span>
                 </div>
-                <div style={{display:"flex",justifyContent:"flex-end"}}>
+                <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:4}}>
+                  {app.host_id && app.status==="outdated" && (
+                    <button onClick={()=>triggerUpdate(app)} disabled={updatingApp===app.id}
+                      title="Update to latest version"
+                      style={{background:"transparent",border:"none",cursor:"pointer",
+                        padding:"4px 5px",display:"flex",alignItems:"center",borderRadius:6,
+                        color:"#1D9E75",transition:"color .15s,background .15s",
+                        opacity:updatingApp===app.id?0.5:1}}
+                      onMouseEnter={e=>{e.currentTarget.style.color="#3ce08c";e.currentTarget.style.background="#1D9E7514";}}
+                      onMouseLeave={e=>{e.currentTarget.style.color="#1D9E75";e.currentTarget.style.background="transparent";}}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+                      </svg>
+                    </button>
+                  )}
                   <CardMenu key={app.id} app={app}/>
                 </div>
               </div>
@@ -2811,6 +2954,31 @@ export default function App() {
             <p className="fh">Adds a quick-access ↗ link button to the card.</p>
           </div>
           <div className="fg2">
+            <label className="fl">Remote host <span style={{color:C.muted,fontWeight:400,textTransform:"none"}}>optional</span></label>
+            <select className="fs" value={overData.host_id||""} onChange={e=>setOverData(d=>({...d,host_id:e.target.value}))}>
+              <option value="">— not linked —</option>
+              {hosts.map(h=><option key={h.id} value={h.id}>{h.name} ({h.ip})</option>)}
+            </select>
+            <p className="fh">Link this app to a host agent for remote updates. <span style={{color:C.accent,cursor:"pointer"}} onClick={()=>{setModal("settings");setSettingsTab("agents");}}>Manage hosts ↗</span></p>
+          </div>
+          {overData.host_id && <>
+            <div className="fg2">
+              <label className="fl">Service name <span style={{color:C.muted,fontWeight:400,textTransform:"none"}}>optional</span></label>
+              <input className="fi" placeholder="e.g. jellyfin (for multi-service compose files)" value={overData.service_name}
+                onChange={e=>setOverData(d=>({...d,service_name:e.target.value}))}/>
+              <p className="fh">The service name inside docker-compose.yml. Leave blank to restart all services.</p>
+            </div>
+            <div className="fg2">
+              <label className="fl">Auto-update</label>
+              <select className="fs" value={overData.auto_update} onChange={e=>setOverData(d=>({...d,auto_update:e.target.value}))}>
+                <option value="off">Off — manual only</option>
+                <option value="ask">Ask me — show notification, I decide</option>
+                <option value="auto">Auto — update automatically, notify me</option>
+                <option value="silent">Silent — update automatically, no notification</option>
+              </select>
+            </div>
+          </>}
+          <div className="fg2">
             <label className="fl">Notes <span style={{color:C.muted,fontWeight:400,textTransform:"none"}}>optional</span></label>
             <textarea className="fi" rows={3} placeholder="Internal notes — deployment location, config details, reminders…"
               value={overData.notes}
@@ -2968,6 +3136,7 @@ export default function App() {
           <div className="stabs">
             {[["notifications","🔔 Notifications"],["integrations","🔗 Telegram"],
               ["appearance","🎨 Appearance"],["branding","✏️ Branding"],
+              ["agents","🤖 Agents"],
               ["security","🔐 Security"],["system","⚙️ System"]].map(([t,l])=>(
               <button key={t} className={`stab${settingsTab===t?" on":""}`} onClick={()=>{setSettingsTab(t);if(t!=="integrations"){setShowChatId(false);setTgTesting("idle");setTgTestMsg("");}}}>{l}</button>
             ))}
@@ -3452,6 +3621,88 @@ export default function App() {
             </div>
           </>}
 
+          {settingsTab==="agents" && <>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div>
+                <div style={{fontWeight:600,fontSize:13}}>Remote agents</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>Connect Vigil to hosts where your containers run — no SSH required.</div>
+              </div>
+              <button className="btn btn-p btn-save" style={{fontSize:12,padding:"5px 12px"}} onClick={()=>{
+                setHostForm({name:"",ip:"",port:"7777",allowed_base:"/home"});
+                setHostWizardStep(1); setNewToken(""); setHostModal("add");
+              }}>+ Add host</button>
+            </div>
+            {hosts.length===0 && (
+              <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:9,padding:20,textAlign:"center",color:C.muted,fontSize:13}}>
+                No hosts configured yet. Add your first remote host above.
+              </div>
+            )}
+            {hosts.map(host=>(
+              <div key={host.id} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:9,padding:"12px 14px",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:32,height:32,borderRadius:7,background:C.accent+"22",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="8" width="18" height="12" rx="2"/>
+                        <circle cx="8.5" cy="13.5" r="1.5"/>
+                        <circle cx="15.5" cy="13.5" r="1.5"/>
+                        <path d="M9 17h6"/>
+                        <path d="M12 8V4"/>
+                        <circle cx="12" cy="3" r="1"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}>
+                        <span style={{fontWeight:600,fontSize:13}}>{host.name}</span>
+                        <span style={{fontSize:10,padding:"2px 7px",borderRadius:20,fontWeight:600,
+                          background:host.status==="connected"?"#1D9E7522":host.status==="unreachable"?"#e05c5c22":"#88878022",
+                          color:host.status==="connected"?"#1D9E75":host.status==="unreachable"?"#e05c5c":C.muted}}>
+                          {host.status==="connected"?"● Connected":host.status==="unreachable"?"● Unreachable":"● Unknown"}
+                        </span>
+                      </div>
+                      <div style={{fontSize:11,color:C.muted}}>{host.ip}:{host.port} · path: {host.allowed_base} · {host.app_count||0} app{host.app_count!==1?"s":""}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button className="btn btn-g btn-sm" style={{fontSize:11}} onClick={async()=>{
+                      setHostTesting(true); setHostTestMsg("Testing…");
+                      try {
+                        await api(`/hosts/${host.id}/test`,{method:"POST"});
+                        setHostTestMsg("Connected!"); setHosts(h=>h.map(hh=>hh.id===host.id?{...hh,status:"connected"}:hh));
+                      } catch(e) {
+                        setHostTestMsg("Unreachable"); setHosts(h=>h.map(hh=>hh.id===host.id?{...hh,status:"unreachable"}:hh));
+                      }
+                      setHostTesting(false); setTimeout(()=>setHostTestMsg(""),4000);
+                    }}>Test</button>
+                    <button className="btn btn-g btn-sm" style={{fontSize:11}} onClick={()=>{
+                      setActiveHost(host);
+                      setHostForm({name:host.name,ip:host.ip,port:String(host.port),allowed_base:host.allowed_base});
+                      setHostModal("edit");
+                    }}>Edit</button>
+                    <button className="btn btn-g btn-sm" style={{fontSize:11,color:"#e05c5c"}} onClick={async()=>{
+                      if(!confirm(`Remove host "${host.name}"? Apps linked to it will be unlinked.`)) return;
+                      await api(`/hosts/${host.id}`,{method:"DELETE"});
+                      setHosts(h=>h.filter(hh=>hh.id!==host.id));
+                      toast("Host removed.");
+                    }}>Remove</button>
+                  </div>
+                </div>
+                <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:10,color:C.muted,fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:5}}>Token</div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,background:C.bg,borderRadius:7,padding:"7px 10px",border:`1px solid ${C.border}`}}>
+                    <span style={{fontFamily:"'Space Mono',monospace",fontSize:11,color:C.muted,flex:1}}>vigil-••••••••••••••••••••••••••••••••</span>
+                    <button className="btn btn-g btn-sm" style={{fontSize:10}} onClick={async()=>{
+                      if(!confirm("Regenerate token? You must update the agent config on that host.")) return;
+                      const r = await api(`/hosts/${host.id}/regenerate-token`,{method:"POST"});
+                      setNewToken(r.token); setActiveHost(host); setHostModal("token");
+                    }}>Regenerate</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {hostTestMsg && <div style={{fontSize:12,color:hostTestMsg==="Connected!"?"#1D9E75":"#e05c5c",marginTop:4,textAlign:"center"}}>{hostTestMsg}</div>}
+          </>}
+
           {settingsTab==="system" && <>
             <div className="fg2">
               <label className="fl">Check interval (hours)</label>
@@ -3506,7 +3757,7 @@ export default function App() {
                 {tgTesting==="sending" ? "Sending…" : "Test notification"}
               </button>
             )}
-            {settingsTab!=="security" && settingsTab!=="system" && (
+            {settingsTab!=="security" && settingsTab!=="system" && settingsTab!=="agents" && (
               <button className="btn btn-p btn-save" onClick={saveSettings}>Save</button>
             )}
           </div>
@@ -3540,10 +3791,12 @@ export default function App() {
               const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/plain"}));
               a.download="vigil-backup-codes.txt"; a.click();
             }}>⬇️ Download</button>
-            <button className="btn btn-g" onClick={()=>{
-              navigator.clipboard?.writeText(backupCodes.map((c,i)=>`${i+1}. ${c}`).join("\n"));
+            <button className="btn btn-g" style={{display:"flex",alignItems:"center",gap:6}} onClick={()=>{
+              copyText(backupCodes.map((c,i)=>`${i+1}. ${c}`).join("\n"));
               toast("Copied to clipboard");
-            }}>📋 Copy all</button>
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy all</button>
             <button className="btn btn-w btn-confirm-save" onClick={()=>setBackupCodes(null)}>I've saved these ✓</button>
           </div>
         </div>
@@ -3558,6 +3811,349 @@ export default function App() {
         {notif.msg}
       </div>
     )}
+
+    {/* ══ Update log modal ══════════════════════════════════════════════════ */}
+    {logModal && (
+      <div className="ov" onClick={e=>e.target===e.currentTarget&&setLogModal(null)}>
+        <div className="modal" style={{maxWidth:560}}>
+          <div className="mt" style={{fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+            Update history — {logModal.name}
+          </div>
+          {updateLogs.length===0 ? (
+            <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"20px 0"}}>No updates recorded yet.</div>
+          ) : (
+            <div style={{maxHeight:380,overflowY:"auto"}}>
+              {updateLogs.map(entry=>(
+                <div key={entry.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",
+                  borderBottom:`1px solid ${C.border}`}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",flexShrink:0,
+                    background:entry.status==="success"?"#1D9E75":entry.status==="failed"?"#e05c5c":"#BA7517"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13}}>
+                      {entry.from_version} → <strong>{entry.to_version}</strong>
+                      <span style={{fontSize:10,marginLeft:7,padding:"1px 6px",borderRadius:10,
+                        background:entry.action==="revert"?"#FAEEDA":"#E6F1FB",
+                        color:entry.action==="revert"?"#854F0B":"#185FA5"}}>
+                        {entry.action}
+                      </span>
+                    </div>
+                    <div style={{fontSize:11,color:C.muted}}>{entry.timestamp?.slice(0,16).replace("T"," ")} · {entry.triggered_by}</div>
+                    {entry.error_message && <div style={{fontSize:11,color:"#e05c5c",marginTop:2}}>{entry.error_message}</div>}
+                  </div>
+                  <div style={{display:"flex",gap:5}}>
+                    <span style={{fontSize:10,padding:"2px 7px",borderRadius:10,fontWeight:600,
+                      background:entry.status==="success"?"#1D9E7522":entry.status==="failed"?"#e05c5c22":"#BA751722",
+                      color:entry.status==="success"?"#1D9E75":entry.status==="failed"?"#e05c5c":"#BA7517"}}>
+                      {entry.status}
+                    </span>
+                    {entry.status==="success" && entry.backup_path && entry.action!=="revert" && (
+                      <button className="btn btn-g btn-sm" style={{fontSize:10,color:"#e05c5c",borderColor:"#e05c5c44"}}
+                        onClick={()=>setRevertModal(entry)}>
+                        Revert
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="ma">
+            <button className="btn btn-g btn-cancel" onClick={()=>setLogModal(null)}>Close</button>
+            {updateLogs.length > 0 && (
+              <button className="btn btn-g btn-sm"
+                style={{color:"#e05c5c",borderColor:"#e05c5c44",fontSize:12}}
+                onClick={async()=>{
+                  if(!confirm(`Clear all update history for ${logModal.name}? This cannot be undone.`)) return;
+                  await api(`/apps/${logModal.id}/logs`,{method:"DELETE"});
+                  setUpdateLogs([]);
+                  toast("History cleared.");
+                }}>
+                Clear history
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ Revert confirmation modal ════════════════════════════════════════ */}
+    {revertModal && logModal && (
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",
+        alignItems:"center",justifyContent:"center",zIndex:3000,padding:20}}>
+        <div className="modal" style={{maxWidth:460}}>
+          <div className="mt">↩ Revert — {logModal.name}</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:14}}>
+            This will restore the compose file from {revertModal.timestamp?.slice(0,16).replace("T"," ")} and restart the service.
+          </div>
+          <div style={{background:C.bg,borderRadius:8,padding:"10px 12px",marginBottom:14,fontFamily:"'Space Mono',monospace",fontSize:12}}>
+            <div style={{color:"#e05c5c",background:"#e05c5c11",padding:"2px 6px",borderRadius:3,marginBottom:3}}>
+              − image: ...:{revertModal.to_version}
+            </div>
+            <div style={{color:"#1D9E75",background:"#1D9E7511",padding:"2px 6px",borderRadius:3}}>
+              + image: ...:{revertModal.from_version}
+            </div>
+          </div>
+          <div className="ma">
+            <button className="btn btn-g btn-cancel" onClick={()=>setRevertModal(null)}>Cancel</button>
+            <button className="btn btn-p btn-save" style={{background:"#A32D2D",borderColor:"#A32D2D"}}
+              onClick={async()=>{
+                try {
+                  const r = await api(`/apps/${logModal.id}/revert/${revertModal.id}`,{method:"POST"});
+                  setApps(p=>p.map(a=>a.id===logModal.id?r.app:a));
+                  const logs = await api(`/apps/${logModal.id}/logs`);
+                  setUpdateLogs(logs);
+                  setRevertModal(null);
+                  toast(`↩ Reverted ${logModal.name} to ${revertModal.from_version}`);
+                } catch(e) { toast(e.message||"Revert failed","error"); }
+              }}>
+              Confirm revert
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ Add host wizard modal ═════════════════════════════════════════════ */}
+    {hostModal==="add" && (
+      <div className="ov" onClick={e=>e.target===e.currentTarget&&setHostModal(null)}>
+        <div className="modal" style={{maxWidth:500}}>
+          <div className="mt">🤖 Add remote host</div>
+          {/* Step indicator */}
+          <div style={{display:"flex",marginBottom:18,borderBottom:`1px solid ${C.border}`}}>
+            {[1,2,3].map(s=>(
+              <div key={s} style={{flex:1,textAlign:"center",padding:"7px 0",fontSize:12,fontWeight:600,
+                borderBottom:`2px solid ${hostWizardStep===s?C.accent:"transparent"}`,
+                color:hostWizardStep===s?C.accent:C.muted,transition:"all .2s"}}>
+                {s===1?"1. Name & IP":s===2?"2. Install agent":"3. Test & save"}
+              </div>
+            ))}
+          </div>
+
+          {hostWizardStep===1 && (
+            <div className="col" style={{gap:12}}>
+              <div className="fg2">
+                <label className="fl">Host name</label>
+                <input className="fi" placeholder="e.g. Media LXC" autoFocus value={hostForm.name}
+                  onChange={e=>setHostForm(f=>({...f,name:e.target.value}))}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10}}>
+                <div className="fg2">
+                  <label className="fl">IP address</label>
+                  <input className="fi" placeholder="192.168.1.101" value={hostForm.ip}
+                    onChange={e=>setHostForm(f=>({...f,ip:e.target.value}))}/>
+                </div>
+                <div className="fg2">
+                  <label className="fl">Port</label>
+                  <input className="fi" placeholder="7777" value={hostForm.port}
+                    onChange={e=>setHostForm(f=>({...f,port:e.target.value}))}/>
+                </div>
+              </div>
+              <div className="fg2">
+                <label className="fl">Allowed base path</label>
+                <input className="fi" placeholder="/home" value={hostForm.allowed_base}
+                  onChange={e=>setHostForm(f=>({...f,allowed_base:e.target.value}))}/>
+                <p className="fh">Agent can only read/write files under this directory. Default: /home</p>
+              </div>
+              <div className="ma">
+                <button className="btn btn-g btn-cancel" onClick={()=>setHostModal(null)}>Cancel</button>
+                <button className="btn btn-p btn-save" disabled={!hostForm.name||!hostForm.ip}
+                  onClick={async()=>{
+                    try {
+                      const h = await api("/hosts",{method:"POST",body:JSON.stringify({
+                        name:hostForm.name, ip:hostForm.ip,
+                        port:parseInt(hostForm.port)||7777,
+                        allowed_base:hostForm.allowed_base||"/home",
+                      })});
+                      setHosts(hs=>[...hs,h]);
+                      setActiveHost(h);
+                      setNewToken(h.token);
+                      setHostWizardStep(2);
+                    } catch(e) { toast(e.message||"Failed to create host","error"); }
+                  }}>Next →</button>
+              </div>
+            </div>
+          )}
+
+          {hostWizardStep===2 && activeHost && (
+            <div className="col" style={{gap:14}}>
+              <div style={{fontSize:13,color:C.muted}}>
+                Run this command on <strong>{activeHost.name}</strong> ({activeHost.ip}):
+              </div>
+              <div style={{background:C.bg,borderRadius:8,padding:"10px 40px 10px 14px",fontFamily:"'Space Mono',monospace",fontSize:12,
+                border:`1px solid ${C.border}`,position:"relative",wordBreak:"break-all",whiteSpace:"pre-wrap",lineHeight:1.6}}>
+                {`curl -s https://raw.githubusercontent.com/youruser/vigil/main/agent/install.sh | bash`}
+                <button onClick={()=>{
+                  copyText(`curl -s https://raw.githubusercontent.com/youruser/vigil/main/agent/install.sh | bash`);
+                  setCopiedCurl(true); setTimeout(()=>setCopiedCurl(false),2000);
+                }}
+                  style={{position:"absolute",right:8,top:8,background:"none",border:"none",cursor:"pointer",
+                    color:copiedCurl?"#1D9E75":C.muted,padding:2,display:"flex",alignItems:"center",transition:"color .2s"}}>
+                  {copiedCurl
+                    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  }
+                </button>
+              </div>
+              <div style={{fontSize:13,color:C.muted}}>When prompted for the token, paste this:</div>
+              <div style={{background:"#185FA522",borderRadius:8,padding:"10px 14px",border:`1px solid ${C.accent}44`}}>
+                <div style={{fontSize:10,color:C.accent,fontWeight:700,marginBottom:5,textTransform:"uppercase",letterSpacing:".5px"}}>Token — shown once, copy now</div>
+                <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,wordBreak:"break-all",color:C.text}}>{newToken}</div>
+                <button onClick={()=>{
+                  copyText(newToken);
+                  setCopiedToken(true); setTimeout(()=>setCopiedToken(false),2000);
+                }}
+                  style={{marginTop:8,background:"none",border:"none",cursor:"pointer",fontSize:11,
+                    color:copiedToken?"#1D9E75":C.accent,padding:0,display:"flex",alignItems:"center",gap:5,transition:"color .2s"}}>
+                  {copiedToken
+                    ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  }
+                  {copiedToken ? "Copied!" : "Copy token"}
+                </button>
+              </div>
+              <div className="ma">
+                <button className="btn btn-g btn-cancel" onClick={()=>setHostModal(null)}>Done for now</button>
+                <button className="btn btn-p btn-save" onClick={()=>{ setCopiedCurl(false); setCopiedToken(false); setHostWizardStep(3); }}>Next →</button>
+              </div>
+            </div>
+          )}
+
+          {hostWizardStep===3 && activeHost && (
+            <div className="col" style={{gap:14}}>
+              <div style={{fontSize:13,color:C.muted}}>
+                Click Test to verify Vigil can reach the agent on <strong>{activeHost.name}</strong>.
+              </div>
+              {hostTestMsg && (
+                <div style={{padding:"10px 14px",borderRadius:8,fontSize:13,fontWeight:600,
+                  background:hostTestMsg==="Connected!"?"#1D9E7522":"#e05c5c22",
+                  color:hostTestMsg==="Connected!"?"#1D9E75":"#e05c5c"}}>
+                  {hostTestMsg==="Connected!"?"✓ Agent is reachable — everything is set up correctly!":"✗ "+hostTestMsg}
+                </div>
+              )}
+              {hostTestMsg==="Connected!" && (
+                <div style={{background:C.bg,borderRadius:8,padding:"12px 14px",border:`1px solid ${C.border}`}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:".5px",marginBottom:8}}>What to do next</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.8}}>
+                    <div>1. Find the app card you want to manage (e.g. Bookstack)</div>
+                    <div>2. Click <strong style={{color:C.text}}>✏️ Edit this card</strong></div>
+                    <div>3. Scroll down to <strong style={{color:C.text}}>Remote host</strong> → pick <strong style={{color:C.text}}>{activeHost.name}</strong></div>
+                    <div>4. Set <strong style={{color:C.text}}>Install path</strong> to the folder with the compose file (e.g. <span style={{fontFamily:"'Space Mono',monospace",fontSize:11}}>/home/bookstack/</span>)</div>
+                    <div>5. Set <strong style={{color:C.text}}>Service name</strong> to the service name in the compose file (e.g. <span style={{fontFamily:"'Space Mono',monospace",fontSize:11}}>bookstack</span>)</div>
+                    <div>6. Choose your <strong style={{color:C.text}}>Auto-update</strong> mode and hit Save</div>
+                  </div>
+                </div>
+              )}
+              <div className="ma">
+                <button className="btn btn-g btn-success" onClick={()=>{ setHostTestMsg(""); setHostModal(null); }}>Done</button>
+                <button className="btn btn-g" disabled={hostTesting}
+                  onClick={async()=>{
+                    setHostTesting(true); setHostTestMsg("");
+                    try {
+                      await api(`/hosts/${activeHost.id}/test`,{method:"POST"});
+                      setHostTestMsg("Connected!");
+                      setHosts(h=>h.map(hh=>hh.id===activeHost.id?{...hh,status:"connected"}:hh));
+                    } catch(e) {
+                      setHostTestMsg(e.message||"Could not reach agent. Check IP, port, and that you used 0.0.0.0 for bind address.");
+                      setHosts(h=>h.map(hh=>hh.id===activeHost.id?{...hh,status:"unreachable"}:hh));
+                    }
+                    setHostTesting(false);
+                  }}>
+                  {hostTesting?"Testing…":"Test connection"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* ══ Edit host modal ═══════════════════════════════════════════════════ */}
+    {hostModal==="edit" && activeHost && (
+      <div className="ov" onClick={e=>e.target===e.currentTarget&&setHostModal(null)}>
+        <div className="modal" style={{maxWidth:460}}>
+          <div className="mt">✏️ Edit host — {activeHost.name}</div>
+          <div className="col" style={{gap:12}}>
+            <div className="fg2">
+              <label className="fl">Host name</label>
+              <input className="fi" autoFocus value={hostForm.name}
+                onChange={e=>setHostForm(f=>({...f,name:e.target.value}))}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10}}>
+              <div className="fg2">
+                <label className="fl">IP address</label>
+                <input className="fi" value={hostForm.ip}
+                  onChange={e=>setHostForm(f=>({...f,ip:e.target.value}))}/>
+              </div>
+              <div className="fg2">
+                <label className="fl">Port</label>
+                <input className="fi" value={hostForm.port}
+                  onChange={e=>setHostForm(f=>({...f,port:e.target.value}))}/>
+              </div>
+            </div>
+            <div className="fg2">
+              <label className="fl">Allowed base path</label>
+              <input className="fi" value={hostForm.allowed_base}
+                onChange={e=>setHostForm(f=>({...f,allowed_base:e.target.value}))}/>
+              <p className="fh">Agent can only read/write files under this directory.</p>
+            </div>
+          </div>
+          <div className="ma">
+            <button className="btn btn-g btn-cancel" onClick={()=>setHostModal(null)}>Cancel</button>
+            <button className="btn btn-p btn-save" onClick={async()=>{
+              try {
+                const h = await api(`/hosts/${activeHost.id}`,{method:"PATCH",body:JSON.stringify({
+                  name:hostForm.name, ip:hostForm.ip,
+                  port:parseInt(hostForm.port)||7777,
+                  allowed_base:hostForm.allowed_base||"/home",
+                })});
+                setHosts(hs=>hs.map(hh=>hh.id===activeHost.id?{...h,app_count:hh.app_count}:hh));
+                setHostModal(null); toast("Host updated.");
+              } catch(e) { toast(e.message||"Failed to update host","error"); }
+            }}>Save</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ Token reveal modal (after regenerate) ════════════════════════════ */}
+    {hostModal==="token" && activeHost && (
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",
+        alignItems:"center",justifyContent:"center",zIndex:3000,padding:20}}>
+        <div className="modal" style={{maxWidth:460}}>
+          <div className="mt">🔑 New token — {activeHost.name}</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:12}}>
+            This is the only time this token will be shown. Copy it and update the agent config on {activeHost.name}.
+          </div>
+          <div style={{background:"#185FA522",borderRadius:8,padding:"12px 14px",border:`1px solid ${C.accent}44`,marginBottom:14}}>
+            <div style={{fontFamily:"'Space Mono',monospace",fontSize:12,wordBreak:"break-all",color:C.text}}>{newToken}</div>
+          </div>
+          <div style={{background:C.bg,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.muted,marginBottom:14}}>
+            On the agent host, run:<br/>
+            <span style={{fontFamily:"'Space Mono',monospace",color:C.text}}>
+              nano /etc/vigil-agent/config.yml
+            </span>
+            <br/>Then restart: <span style={{fontFamily:"'Space Mono',monospace",color:C.text}}>systemctl restart vigil-agent</span>
+          </div>
+          <div className="ma">
+            <button onClick={()=>{
+              copyText(newToken);
+              setCopiedToken(true); setTimeout(()=>setCopiedToken(false),2000);
+            }}
+              className="btn btn-g" style={{display:"flex",alignItems:"center",gap:6,
+                color:copiedToken?"#1D9E75":undefined, borderColor:copiedToken?"#1D9E75":undefined,
+                transition:"color .2s,border-color .2s"}}>
+              {copiedToken
+                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              }
+              {copiedToken ? "Copied!" : "Copy token"}
+            </button>
+            <button className="btn btn-p btn-save" onClick={()=>{ setCopiedToken(false); setHostModal(null); }}>Done</button>
+          </div>
+        </div>
+      </div>
+    )}
+
     </>
   );
 }

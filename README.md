@@ -8,7 +8,7 @@
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
-[![Version](https://img.shields.io/badge/v1.1-e0a83c.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/v2.0-e0a83c.svg)](./CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-alpha-e05c5c.svg)](#alpha-notice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5865F2.svg)](./LICENSE)
 [![Docker Compose](https://img.shields.io/badge/deploy-docker%20compose-2496ED.svg)](./docker-compose.yml)
@@ -206,14 +206,26 @@ For anyone curious about the internals or looking to contribute:
 vigil/
 │
 ├── frontend/                   React 18 + Vite
-│   └── src/App.jsx             Single-file SPA (~2,500 lines)
+│   └── src/App.jsx             Single-file SPA
 │
 ├── backend/                    Python 3.11 + Flask
-│   ├── app.py                  All API routes, auth, rate limiting, input validation
-│   ├── models.py               SQLAlchemy models — User, TrackedApp, Category, Settings
-│   ├── migrations.py           11 incremental SQLite schema migrations
-│   ├── scheduler.py            APScheduler background jobs + registry polling logic
+│   ├── app.py                  App factory + blueprint registration
+│   ├── config.py               Constants, rate limiter
+│   ├── utils.py                Auth helpers, input validation
+│   ├── categories.py           Auto-categorisation logic + seeding
+│   ├── models.py               SQLAlchemy models — User, TrackedApp, Category, Host, UpdateLog, Settings
+│   ├── migrations.py           17 incremental SQLite schema migrations
+│   ├── scheduler.py            APScheduler background jobs + registry polling
+│   ├── routes/
+│   │   ├── auth.py             Login, TOTP, backup codes, change-password/username
+│   │   ├── apps.py             App CRUD, checks, snooze, ignore, history, icons
+│   │   ├── hosts.py            Host management, agent comms, update execution, revert
+│   │   └── settings.py         Settings, Telegram, scan summary, health
 │   └── requirements.txt        ~10 dependencies, intentionally minimal
+│
+├── agent/                      Remote agent (runs on managed hosts)
+│   ├── vigil-agent.py          Lightweight HTTP agent — read/write/restart compose files
+│   └── install.sh              One-command installer with systemd + validation
 │
 ├── nginx/default.conf          Thin reverse proxy (frontend ↔ backend routing)
 ├── docker-compose.yml          Single-command deploy
@@ -222,7 +234,7 @@ vigil/
 └── README.md                   You are here
 ```
 
-The backend is ~1,200 lines of plain Flask with no magic frameworks. The frontend is a single JSX file. Both are deliberately readable — if you know Python and React basics, you should be able to follow the code without a guided tour.
+The backend is modular Flask with no magic frameworks. The frontend is a single JSX file. The agent is a self-contained ~300 line Python script. All three are deliberately readable — if you know Python and React basics, you can follow any part of the code without a guided tour.
 
 ---
 
@@ -267,6 +279,28 @@ npm install
 npm run dev
 # UI at http://localhost:5173 — proxies /api/* to :5000 automatically
 ```
+
+---
+
+## Screenshots
+
+### Dark Mode
+![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
+
+### Light Mode
+![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
+
+### List View
+![List View](docs/screenshots/List-view.png)
+
+### Settings
+![Settings](docs/screenshots/Settings.png)
+
+### Table View
+![Table View](docs/screenshots/Table-view.png)
+
+### Telegram
+![Telegram](docs/screenshots/Telegram-menu.png)
 
 ---
 

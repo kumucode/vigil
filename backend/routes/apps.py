@@ -280,13 +280,17 @@ def update_app(app_id):
         entry.status  = _derive_status(entry.version, entry.latest_version)
 
     for field in ("category", "notify_policy", "version_source_url", "notes",
-                  "install_path", "container_id", "ignored_version", "app_url"):
+                  "install_path", "container_id", "ignored_version", "app_url",
+                  "service_name", "auto_update"):
         if field in data:
             setattr(entry, field, clamp(data[field], field))
 
     if "category" in data:
         chosen = (data["category"] or "").strip()
         entry.category_locked = (chosen != "" and chosen != "uncategorized")
+
+    if "host_id" in data:
+        entry.host_id = int(data["host_id"]) if data["host_id"] else None
 
     if "custom_icon" in data:
         entry.custom_icon = (clamp(data["custom_icon"], "custom_icon") or "").strip() or None

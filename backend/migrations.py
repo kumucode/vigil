@@ -279,11 +279,60 @@ def migration_15(conn, insp):
         log.info("  [v15] tracked_apps.app_url")
 
 
+def migration_16(conn, insp):
+    """Add hosts and update_log tables."""
+    tables = sa.inspect(conn).get_table_names()
+    if "hosts" not in tables:
+        conn.execute(sa.text("""
+            CREATE TABLE hosts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                name         VARCHAR(100) NOT NULL,
+                ip           VARCHAR(100) NOT NULL,
+                port         INTEGER NOT NULL DEFAULT 7777,
+                token_hash   VARCHAR(200) NOT NULL,
+                allowed_base VARCHAR(500) NOT NULL DEFAULT '/home',
+                last_seen    VARCHAR(40),
+                status       VARCHAR(20) NOT NULL DEFAULT 'unknown',
+                created_at   DATETIME
+            )
+        """))
+        log.info("  [v16] created hosts table")
+    if "update_log" not in tables:
+        conn.execute(sa.text("""
+            CREATE TABLE update_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_id        INTEGER NOT NULL REFERENCES tracked_apps(id) ON DELETE CASCADE,
+                timestamp     VARCHAR(40) NOT NULL,
+                action        VARCHAR(20) NOT NULL DEFAULT 'update',
+                from_version  VARCHAR(100),
+                to_version    VARCHAR(100),
+                status        VARCHAR(20) NOT NULL DEFAULT 'success',
+                backup_path   VARCHAR(500),
+                triggered_by  VARCHAR(50) NOT NULL DEFAULT 'user',
+                error_message TEXT
+            )
+        """))
+        log.info("  [v16] created update_log table")
+
+
+def migration_17(conn, insp):
+    """Add host_id, service_name, auto_update to tracked_apps."""
+    for col, defn in [
+        ("host_id",      "INTEGER REFERENCES hosts(id) ON DELETE SET NULL"),
+        ("service_name", "VARCHAR(100)"),
+        ("auto_update",  "VARCHAR(20) NOT NULL DEFAULT 'off'"),
+    ]:
+        if not _col_exists(insp, "tracked_apps", col):
+            conn.execute(sa.text(f"ALTER TABLE tracked_apps ADD COLUMN {col} {defn}"))
+            log.info("  [v17] tracked_apps.%s", col)
+
+
 MIGRATIONS     = {1:  migration_1,  2:  migration_2,  3:  migration_3,
                   4:  migration_4,  5:  migration_5,  6:  migration_6,
                   7:  migration_7,  8:  migration_8,  9:  migration_9,
                   10: migration_10, 11: migration_11, 12: migration_12,
-                  13: migration_13, 14: migration_14, 15: migration_15}
+                  13: migration_13, 14: migration_14, 15: migration_15,
+                  16: migration_16, 17: migration_17}
 LATEST_VERSION = max(MIGRATIONS.keys())
 
 
