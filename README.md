@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/youruser/vigil/main/frontend/public/logo.svg" alt="Vigil logo" width="72" height="72"/>
+<img src="https://github.com/kumucode/vigil/blob/main/official-icon.png" alt="Vigil logo" width="72" height="72"/>
 
 # Vigil
 
