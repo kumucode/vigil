@@ -1203,7 +1203,7 @@ export default function App() {
   const [imageInput, setImageInput] = useState("");
   const [parsed, setParsed]         = useState(null);
   const [newVersion, setNewVersion] = useState("");
-  const [overData, setOverData]     = useState({category:"",custom_icon:"",version_source_url:"",notes:"",install_path:"",container_id:""});
+  const [overData, setOverData]     = useState({category:"",custom_icon:"",version_source_url:"",notes:"",install_path:"",container_id:"",app_url:""});
   const [pendingIcon, setPendingIcon]   = useState(null);
   const [showInstallPath, setShowInstallPath] = useState(false);
   const [history, setHistory]           = useState([]);
@@ -1544,7 +1544,7 @@ export default function App() {
     setModal("override"); setActiveApp(app); setPendingIcon(null); setShowInstallPath(false);
     
     loadIconLib(); // fetch icon lists in background if not already loaded
-    setOverData({image:app.image||"",name:app.name||"",category:app.category||"uncategorized",custom_icon:app.custom_icon||"",version_source_url:app.version_source_url||"",notes:app.notes||"",install_path:app.install_path||"",container_id:app.container_id||""});
+    setOverData({image:app.image||"",name:app.name||"",category:app.category||"uncategorized",custom_icon:app.custom_icon||"",version_source_url:app.version_source_url||"",notes:app.notes||"",install_path:app.install_path||"",container_id:app.container_id||"",app_url:app.app_url||""});
   };
 
   // ── Icon library (fetched once, cached in ref) ────────────────────────────────
@@ -1655,6 +1655,7 @@ export default function App() {
         notes: overData.notes,
         install_path: overData.install_path,
         container_id: overData.container_id,
+        app_url: overData.app_url,
       };
       if (overData.image.trim() && overData.image.trim() !== activeApp.image) patch.image = overData.image.trim();
       if (overData.name.trim() && overData.name.trim() !== activeApp.name) patch.name = overData.name.trim();
@@ -2110,7 +2111,6 @@ export default function App() {
     const menu = open ? createPortal(
       <div ref={menuRef} className="dd-menu" style={{position:"absolute",top:menuPos.top,right:menuPos.right,left:"auto"}}
         onClick={e=>e.stopPropagation()}>
-            <div className="dd-item" onClick={()=>{setOpen(false);setModal("edit");setActiveApp(app);setNewVersion(app.version);}}>✎ Update version</div>
             <div className="dd-item" onClick={()=>{setOpen(false);openOverride(app);}}>✏️ Edit this card</div>
             <div className="dd-sep"/>
             {/* Category submenu — click to open, click outside to close */}
@@ -2153,6 +2153,20 @@ export default function App() {
     ) : null;
     return (
       <div className="dd-wrap" style={{display:"flex",alignItems:"center",gap:4}}>
+        {/* ↗ Domain link button */}
+        <button className="btn btn-sm"
+          title={app.app_url ? `Open app — ${app.app_url}` : "Add domain in Edit this card"}
+          onClick={()=>{ if(app.app_url) window.open(app.app_url,"_blank"); else { setOpen(false); openOverride(app); } }}
+          style={{background:"transparent",border:"none",
+            color: app.app_url ? C.accent+"cc" : C.muted,
+            cursor:"pointer",padding:"4px 5px",
+            display:"flex",alignItems:"center",borderRadius:6,transition:"color .15s,background .15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.color=app.app_url?"#3ce08c":C.accent;e.currentTarget.style.background=app.app_url?"#3ce08c14":C.accent+"14";}}
+          onMouseLeave={e=>{e.currentTarget.style.color=app.app_url?C.accent+"cc":C.muted;e.currentTarget.style.background="transparent";}}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+        </button>
         <button className="btn btn-sm" onClick={()=>removeApp(app.id)} title="Remove this app"
           style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",padding:"4px 5px",
             display:"flex",alignItems:"center",borderRadius:6,transition:"color .15s,background .15s"}}
@@ -2468,7 +2482,15 @@ export default function App() {
                 </div>
                 {app.status==="error"&&app.last_error&&<div className="err-msg">{app.last_error}</div>}
                 <div className="cv">
-                  <div className="vb"><div className="vl">Current</div><div className="vv">{app.version}</div></div>
+                  <div className="vb"
+                    onClick={()=>{setModal("edit");setActiveApp(app);setNewVersion(app.version);}}
+                    title="Click to update version"
+                    style={{cursor:"pointer",transition:"border-color .15s"}}
+                    onMouseEnter={e=>e.currentTarget.style.borderColor=C.accent+"66"}
+                    onMouseLeave={e=>e.currentTarget.style.borderColor=""}>
+                    <div className="vl">Current</div>
+                    <div className="vv">{app.version}</div>
+                  </div>
                   <div className="vb" style={app.status==="outdated"?{borderColor:"#e05c5c44"}:app.status==="pinned"?{borderColor:"#a78bfa44"}:{}} title={app.status==="pinned"?"Tracking a floating tag — latest release shown for reference":undefined}>
                     <div className="vl">Latest</div>
                     <div className="vv" style={app.status==="outdated"?{color:"#e05c5c"}:app.status==="pinned"?{color:"#a78bfa"}:{}}>{app.latest_version||"—"}</div>
@@ -2523,7 +2545,12 @@ export default function App() {
                   <span className="tag" style={{background:"transparent",color:"var(--color-text-secondary, #5a5a7a)",border:"0.5px solid rgba(255,255,255,0.12)",transition:"background .18s, color .18s"}} onMouseEnter={e=>{e.currentTarget.style.background=cc+"22";e.currentTarget.style.color=cc;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--color-text-secondary, #5a5a7a)";}}>{getCatLabel(app.category)}</span>
                   {app.detection_channel&&<ChannelPill channel={app.detection_channel} url={resolveChannelUrl(app.detection_channel,app.image,app.version_source_url)}/>}
                 </div>
-                <div className="lc">{app.version}</div>
+                <div className="lc"
+                  onClick={()=>{setModal("edit");setActiveApp(app);setNewVersion(app.version);}}
+                  title="Click to update version"
+                  style={{cursor:"pointer",transition:"color .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.color=C.accent}
+                  onMouseLeave={e=>e.currentTarget.style.color=""}>{app.version}</div>
                 <div className="lc" style={app.status==="outdated"?{color:"#e05c5c"}:app.status==="pinned"?{color:"#a78bfa"}:{}}>{app.latest_version||"—"}</div>
                 <div><span className="sb" style={{background:sc+"22",color:sc,border:`1px solid ${sc}44`}}>
                   <span style={{width:6,height:6,borderRadius:"50%",background:sc,display:"inline-block"}}/>
@@ -2563,7 +2590,12 @@ export default function App() {
                     {getCatLabel(app.category)}
                   </span>
                 </div>
-                <div className="ct-ver" style={{color:C.muted}}>{app.version||"—"}</div>
+                <div className="ct-ver"
+                  onClick={()=>{setModal("edit");setActiveApp(app);setNewVersion(app.version);}}
+                  title="Click to update version"
+                  style={{color:C.muted,cursor:"pointer",transition:"color .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.color=C.accent}
+                  onMouseLeave={e=>e.currentTarget.style.color=C.muted}>{app.version||"—"}</div>
                 <div className="ct-ver"
                   style={isOut?{color:"#e05c5c",fontWeight:700}:isOK?{color:"#3ce08c"}:app.status==="pinned"?{color:"#a78bfa"}:{color:C.text}}>
                   {app.latest_version||"—"}
@@ -2771,6 +2803,12 @@ export default function App() {
                 title="Container or VM ID (e.g. LXC 101, VM 105)"/>
             </div>
             <p className="fh">Install path (masked) · Container or VM ID (e.g. LXC 101, VM 105)</p>
+          </div>
+          <div className="fg2">
+            <label className="fl">Domain <span style={{color:C.muted,fontWeight:400,textTransform:"none"}}>optional</span></label>
+            <input className="fi" placeholder="https://jellyfin.yourdomain.com" value={overData.app_url}
+              onChange={e=>setOverData(d=>({...d,app_url:e.target.value}))}/>
+            <p className="fh">Adds a quick-access ↗ link button to the card.</p>
           </div>
           <div className="fg2">
             <label className="fl">Notes <span style={{color:C.muted,fontWeight:400,textTransform:"none"}}>optional</span></label>

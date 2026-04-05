@@ -270,11 +270,20 @@ def migration_14(conn, insp):
         log.info("  [v14] tracked_apps.container_id")
 
 
+def migration_15(conn, insp):
+    """Add app_url column to tracked_apps."""
+    if not _col_exists(insp, "tracked_apps", "app_url"):
+        conn.execute(sa.text(
+            "ALTER TABLE tracked_apps ADD COLUMN app_url VARCHAR(500)"
+        ))
+        log.info("  [v15] tracked_apps.app_url")
+
+
 MIGRATIONS     = {1:  migration_1,  2:  migration_2,  3:  migration_3,
                   4:  migration_4,  5:  migration_5,  6:  migration_6,
                   7:  migration_7,  8:  migration_8,  9:  migration_9,
                   10: migration_10, 11: migration_11, 12: migration_12,
-                  13: migration_13, 14: migration_14}
+                  13: migration_13, 14: migration_14, 15: migration_15}
 LATEST_VERSION = max(MIGRATIONS.keys())
 
 

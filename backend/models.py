@@ -102,6 +102,7 @@ class TrackedApp(db.Model):
     notes                 = db.Column(db.Text,       nullable=True)
     install_path          = db.Column(db.String(500), nullable=True)
     container_id          = db.Column(db.String(100), nullable=True)  # e.g. "LXC 101" or "VM 105"
+    app_url               = db.Column(db.String(500), nullable=True)  # e.g. "https://jellyfin.local"
 
     def to_dict(self):
         return {
@@ -131,6 +132,7 @@ class TrackedApp(db.Model):
             "notes":                 self.notes or "",
             "install_path":          self.install_path or "",
             "container_id":          self.container_id or "",
+            "app_url":               self.app_url or "",
         }
 
 

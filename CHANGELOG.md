@@ -1,3 +1,18 @@
+## [1.1] — 2026-04-04
+
+### Added
+- **Clickable current version** — click the "Current" field in any view (grid, list, compact) to update the version directly, without opening the ⋯ menu
+- **Domain link** — add a URL to any app via "Edit this card" → Domain field; a ↗ button appears in the card action row for one-click access to the app
+- **Domain field in Edit modal** — new optional field below Install Path for storing the app's web address
+
+### Changed
+- "Update version" removed from the ⋯ menu — the clickable Current field replaces it
+- ↗ link button is now the first icon in the card action row (↗ · 🗑 · 📁 · 🔔 · ⋯)
+
+### Fixed
+- Compact table category tags now match the muted/hover style used in other views
+- `seafileltd/seafile-mc:13.0-latest` and similar compound floating tags now correctly show as Pinned instead of Unknown
+
 # Changelog
 
 All notable changes to Vigil will be documented here.
@@ -7,7 +22,7 @@ Versions follow [Semantic Versioning](https://semver.org/) — `MAJOR.MINOR.PATC
 
 ---
 
-## [v1.0] — 2026 — Initial public release
+## [v1.0] — 2025 — Initial public release
 
 This is the first public release of Vigil. The app is functional and
 has been used in real self-hosted environments, but consider it alpha:

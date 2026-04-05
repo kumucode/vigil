@@ -280,7 +280,7 @@ def update_app(app_id):
         entry.status  = _derive_status(entry.version, entry.latest_version)
 
     for field in ("category", "notify_policy", "version_source_url", "notes",
-                  "install_path", "container_id", "ignored_version"):
+                  "install_path", "container_id", "ignored_version", "app_url"):
         if field in data:
             setattr(entry, field, clamp(data[field], field))
 

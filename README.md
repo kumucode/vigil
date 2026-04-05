@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="official-icon.png" alt="Vigil logo" width="230" height="400"/>
+<img src="https://raw.githubusercontent.com/youruser/vigil/main/frontend/public/logo.svg" alt="Vigil logo" width="72" height="72"/>
 
 # Vigil
 
@@ -8,7 +8,7 @@
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
-[![Version](https://img.shields.io/badge/version-1.0-e0a83c.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/v1.1-e0a83c.svg)](./CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-alpha-e05c5c.svg)](#alpha-notice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5865F2.svg)](./LICENSE)
 [![Docker Compose](https://img.shields.io/badge/deploy-docker%20compose-2496ED.svg)](./docker-compose.yml)
@@ -19,7 +19,7 @@ Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
 ---
 
-> **⚠️ Alpha release — v1.0**
+> **⚠️ Alpha release — vv1.0**
 >
 > Vigil is functional and has been tested in real self-hosted environments,
 > but it is still early software. You may encounter rough edges. If you do,
@@ -270,29 +270,9 @@ npm run dev
 
 ---
 
-## Screenshots
-
-### Dashboard — Dark Mode
-![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
-
-### Dashboard — Light Mode
-![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
-
-### List View
-![List View](docs/screenshots/List-view.png)
-
-### Compact Table View
-![Table View](docs/screenshots/Table-view.png)
-
-### Settings
-![Settings](docs/screenshots/Settings.png)
-
-### Telegram Notifications
-![Telegram](docs/screenshots/Telegram-menu.png)
-
 ## Contributing & community
 
-Vigil started as a personal tool to solve a real itch — keeping track of 15+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
+Vigil started as a personal tool to solve a real itch — keeping track of 30+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
 
 **Ways to get involved:**
 
