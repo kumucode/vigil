@@ -292,4 +292,24 @@ Made for the self-hosted community · MIT License
 
 *If something's broken, confusing, or missing — that's a bug worth reporting.*
 
+## Screenshots
+
+### Dark Mode
+![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
+
+### Light Mode
+![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
+
+### List View
+![List View](docs/screenshots/List-view.png)
+
+### Settings
+![List View](docs/screenshots/Settings.png)
+
+### Table-view
+![List View](docs/screenshots/Table-view.png)
+
+### Telegram-menu
+![List View](docs/screenshots/Telegram-menu.png)
+
 </div>
