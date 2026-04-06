@@ -2,9 +2,10 @@
 
 <img src="https://github.com/kumucode/vigil/blob/main/official-icon.png" alt="Vigil logo" width="300" height="270"/>
 
-# Vigil
 
-**Never miss a Docker update again.**
+⚠️ A quick disclaimer: I value honesty and transparency, which is why it's important to mention that this project was fully developed with AI assistance. This is a vibecoding project created by a tech enthusiast, not a professional developer. So, if you’re a professional in the field, I’d love to hear your opinions on how to minimize, or even eliminate, the “AI Slop.” I’m not entirely sure which direction this project will take, but I’m excited to share it and see what others think.
+
+# Vigil
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
