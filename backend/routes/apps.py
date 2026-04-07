@@ -279,11 +279,19 @@ def update_app(app_id):
         entry.version = clamp((data["version"] or "").strip(), "version") or entry.version
         entry.status  = _derive_status(entry.version, entry.latest_version)
 
-    for field in ("category", "notify_policy", "version_source_url", "notes",
-                  "install_path", "container_id", "ignored_version", "app_url",
+    for field in ("category", "notify_policy", "notes",
+                  "install_path", "container_id", "ignored_version",
                   "service_name", "auto_update"):
         if field in data:
             setattr(entry, field, clamp(data[field], field))
+
+    # URL fields — only allow http:// and https:// to prevent javascript: and file:// URIs
+    for url_field in ("app_url", "version_source_url"):
+        if url_field in data:
+            raw_url = (data[url_field] or "").strip()
+            if raw_url and not raw_url.startswith(("http://", "https://")):
+                return jsonify({"error": f"{url_field} must start with http:// or https://"}), 400
+            setattr(entry, url_field, clamp(raw_url, url_field) or None)
 
     if "category" in data:
         chosen = (data["category"] or "").strip()

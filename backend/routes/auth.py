@@ -92,13 +92,16 @@ def _generate_backup_codes(n: int = 8) -> tuple[list[str], str]:
     """
     Generate *n* one-time backup codes.
     Returns (plaintext_list, json_string_of_hashes).
-    Codes are stored as SHA-256 hashes — never in plaintext.
+    Codes are stored as bcrypt hashes — never in plaintext.
+    bcrypt is used instead of SHA-256 to resist offline brute-force
+    if the database is ever extracted.
     """
+    import bcrypt as _bcrypt
     codes = []
     for _ in range(n):
         raw = "".join(_secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(10))
         codes.append(f"{raw[:5]}-{raw[5:]}")
-    hashed = [_hashlib.sha256(c.encode()).hexdigest() for c in codes]
+    hashed = [_bcrypt.hashpw(c.encode(), _bcrypt.gensalt(rounds=10)).decode() for c in codes]
     return codes, json.dumps(hashed)
 
 
@@ -107,7 +110,10 @@ def _verify_backup_code(user: User, code: str) -> bool:
     Validate *code* against the user's stored backup code hashes.
     If valid, the used hash is removed (each code is truly one-time).
     Caller must call db.session.commit() after a successful verification.
+    Supports both new bcrypt hashes and legacy SHA-256 hashes for
+    backwards compatibility with existing installations.
     """
+    import bcrypt as _bcrypt
     if not user.totp_backup_codes:
         return False
     clean = code.replace("-", "").replace(" ", "").upper()
@@ -117,11 +123,21 @@ def _verify_backup_code(user: User, code: str) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     for candidate in candidates:
-        h = _hashlib.sha256(candidate.encode()).hexdigest()
-        if h in hashes:
-            hashes.remove(h)
-            user.totp_backup_codes = json.dumps(hashes)
-            return True
+        for i, h in enumerate(hashes):
+            matched = False
+            if h.startswith("$2b$") or h.startswith("$2a$"):
+                # bcrypt hash (new format)
+                try:
+                    matched = _bcrypt.checkpw(candidate.encode(), h.encode())
+                except Exception:
+                    pass
+            else:
+                # legacy SHA-256 hash — support existing installs
+                matched = (_hashlib.sha256(candidate.encode()).hexdigest() == h)
+            if matched:
+                hashes.pop(i)
+                user.totp_backup_codes = json.dumps(hashes)
+                return True
     return False
 
 

@@ -1,15 +1,14 @@
 <div align="center">
 
-<img src="https://github.com/kumucode/vigil/blob/main/official-icon.png" alt="Vigil logo" width="300" height="270"/>
-
-
-⚠️ A quick disclaimer: I value honesty and transparency, which is why it's important to mention that this project was fully developed with AI assistance. This is a vibecoding project created by a tech enthusiast, not a professional developer. So, if you’re a professional in the field, I’d love to hear your opinions on how to minimize, or even eliminate, the “AI Slop.” I’m not entirely sure which direction this project will take, but I’m excited to share it and see what others think.
+<img src="https://github.com/username/vigil/blob/main/official-icon.png" alt="Vigil logo" width="300" height="270"/>
 
 # Vigil
 
+**Never miss a Docker update again.**
+
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
-[![Version](https://img.shields.io/badge/v2.0-e0a83c.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.0-e0a83c.svg)](./CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-alpha-e05c5c.svg)](#alpha-notice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5865F2.svg)](./LICENSE)
 [![Docker Compose](https://img.shields.io/badge/deploy-docker%20compose-2496ED.svg)](./docker-compose.yml)
@@ -20,7 +19,7 @@ Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
 ---
 
-> **⚠️ Alpha release — v2.0**
+> **⚠️ Alpha release — vv1.0**
 >
 > Vigil is functional and has been tested in real self-hosted environments,
 > but it is still early software. You may encounter rough edges. If you do,
@@ -283,6 +282,28 @@ npm run dev
 
 ---
 
+## Screenshots
+
+### Dark Mode
+![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
+
+### Light Mode
+![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
+
+### List View
+![List View](docs/screenshots/List-view.png)
+
+### Settings
+![Settings](docs/screenshots/Settings.png)
+
+### Table View
+![Table View](docs/screenshots/Table-view.png)
+
+### Telegram
+![Telegram](docs/screenshots/Telegram-menu.png)
+
+---
+
 ## Contributing & community
 
 Vigil started as a personal tool to solve a real itch — keeping track of 30+ self-hosted containers without losing the plot. If you've found it useful, have ideas, or spotted something broken, you're warmly welcome here.
@@ -304,25 +325,5 @@ You don't need to be a developer to contribute. Clear bug reports, well-describe
 Made for the self-hosted community · MIT License
 
 *If something's broken, confusing, or missing — that's a bug worth reporting.*
-
-## Screenshots
-
-### Dark Mode
-![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
-
-### Light Mode
-![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
-
-### List View
-![List View](docs/screenshots/List-view.png)
-
-### Settings
-![List View](docs/screenshots/Settings.png)
-
-### Table-view
-![List View](docs/screenshots/Table-view.png)
-
-### Telegram-menu
-![List View](docs/screenshots/Telegram-menu.png)
 
 </div>

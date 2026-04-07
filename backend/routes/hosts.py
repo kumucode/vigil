@@ -304,12 +304,12 @@ def trigger_update(app_id):
     old_tag     = old_version
     new_tag     = new_version
     # Replace image: <image_base>:<old_tag> with image: <image_base>:<new_tag>
-    # Also handles no-tag case
+    # Using a lambda replacement to prevent backreference injection from version strings
     pattern     = re.compile(
         r'(image\s*:\s*' + re.escape(image_base) + r')(?::[\w.\-]+)?',
         re.IGNORECASE
     )
-    new_content = pattern.sub(r'\g<1>:' + new_tag, compose_content)
+    new_content = pattern.sub(lambda m: m.group(1) + ':' + new_tag, compose_content)
 
     if new_content == compose_content:
         return jsonify({"error": "Could not find the image in the compose file. Check the image and install path."}), 400

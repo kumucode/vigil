@@ -19,6 +19,7 @@ Config file: /etc/vigil-agent/config.yml
   port:         7777
 """
 
+import hmac
 import json
 import logging
 import os
@@ -32,9 +33,10 @@ from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CONFIG_PATH  = os.environ.get("VIGIL_CONFIG", "/etc/vigil-agent/config.yml")
-BACKUP_DIR   = ".vigil-backups"
-MAX_BACKUPS  = 10
+CONFIG_PATH    = os.environ.get("VIGIL_CONFIG", "/etc/vigil-agent/config.yml")
+BACKUP_DIR     = ".vigil-backups"
+MAX_BACKUPS    = 10
+MAX_BODY_BYTES = 10 * 1024 * 1024   # 10 MB — reject oversized requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -79,7 +81,8 @@ log.info("Agent starting — allowed_base=%s bind=%s:%d", ALLOWED_BASE, BIND_ADD
 # ── Security helpers ──────────────────────────────────────────────────────────
 
 def _check_token(req_token: str) -> bool:
-    return req_token == TOKEN
+    """Constant-time comparison — prevents timing-based token guessing."""
+    return hmac.compare_digest(req_token.encode(), TOKEN.encode())
 
 
 def _safe_path(directory: str) -> Path | None:
@@ -126,13 +129,16 @@ def _restart_service(compose_dir: Path, service_name: str) -> str:
     cmd = ["docker", "compose", "up", "-d", "--no-deps"]
     if service_name:
         cmd.append(service_name)
-    result = subprocess.run(
-        cmd,
-        cwd=str(compose_dir),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(compose_dir),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("docker compose timed out after 120 seconds. The container may still be starting — check manually.")
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
         raise RuntimeError(f"docker compose failed (exit {result.returncode}): {output}")
@@ -163,6 +169,9 @@ class AgentHandler(BaseHTTPRequestHandler):
 
     def _read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
+        if length > MAX_BODY_BYTES:
+            self._send(413, {"error": f"Request body too large (max {MAX_BODY_BYTES // 1024 // 1024} MB)"})
+            return {}
         if length:
             return json.loads(self.rfile.read(length).decode())
         return {}
@@ -174,7 +183,7 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send(200, {
                 "status":       "ok",
                 "allowed_base": str(ALLOWED_BASE),
-                "version":      "1.2",
+                "version":      "2.0",
             })
         else:
             self._send(404, {"error": "Not found"})
@@ -233,10 +242,23 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": f"No docker-compose.yml found in {safe_dir}"})
             return
 
-        # Validate it's at least parseable YAML before writing
+        # Validate it's parseable YAML before writing — strictly required
         try:
-            import yaml
-            yaml.safe_load(content)
+            import yaml as _yaml
+            parsed = _yaml.safe_load(content)
+            # Basic structure check — must have a 'services' key
+            if not isinstance(parsed, dict) or "services" not in parsed:
+                self._send(400, {"error": "Invalid compose file: missing 'services' key."})
+                return
+        except ImportError:
+            self._send(500, {
+                "error": (
+                    "PyYAML is not installed on the agent host. "
+                    "Vigil refuses to write compose files without YAML validation. "
+                    "Install it: pip install pyyaml  then restart the agent."
+                )
+            })
+            return
         except Exception as e:
             self._send(400, {"error": f"Invalid YAML: {e}"})
             return

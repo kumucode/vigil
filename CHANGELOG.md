@@ -4,6 +4,51 @@ All notable changes to Vigil will be documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.1] — 2026-04-06
+
+### Security
+- Agent token comparison now uses `hmac.compare_digest` — constant-time,
+  not vulnerable to timing-based guessing attacks
+- Backup codes migrated from SHA-256 to bcrypt (cost 10) with full
+  backwards compatibility for existing installs
+- Agent request body capped at 10 MB — oversized requests rejected before
+  any processing
+- YAML validation is now strictly required before the agent writes any
+  compose file — refuses with a clear error if PyYAML is not installed
+- URL fields (`app_url`, `version_source_url`) validated server-side to
+  only accept `http://` and `https://` schemes
+- Regex compose file patching replaced with lambda substitution — prevents
+  backreference injection from malformed version strings
+- SECURITY.md fully rewritten — honest, plain-language disclosure of what
+  Vigil protects, known limitations, deployment recommendations, and
+  what the agent can and cannot do
+
+### Agent installer
+- New run mode selection: dedicated user (recommended) vs root, with full
+  risk disclosure and required confirmation for root mode
+- Custom agent username — users can name the system account to match their
+  own naming conventions (default: `vigil-agent`)
+- Preflight checks before any configuration is collected:
+  - Python 3 presence and version
+  - Docker presence and version
+  - Docker group existence — offers to create it if missing, with socket
+    permission fix
+  - Docker socket accessibility and group ownership
+  - Port availability check before installation
+- All inputs validated with retry loops — invalid IP addresses, non-numeric
+  ports, out-of-range ports, and malformed tokens are rejected with clear
+  messages instead of silently accepted
+- Installer offers to create the `allowed_base` directory if it doesn't exist
+- If the agent service fails to start, the last 10 log lines are shown
+  inline instead of just printing a warning
+- Version string updated to 2.0 in agent health endpoint
+
+### Known limitations (documented, not yet fixed — planned v2.2)
+- Agent communication is plain HTTP — token travels in plaintext on the LAN
+- Agent token stored in plaintext in the Vigil database (needed for outbound calls)
+- No session idle timeout
+- Dependencies not yet pinned with hash verification
+
 ## [2.0] — 2026-04-05
 
 ### Added — Remote agent system
