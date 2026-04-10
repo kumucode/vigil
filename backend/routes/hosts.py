@@ -13,15 +13,18 @@ routes/hosts.py — Remote host (agent) management and update execution.
   POST   /api/apps/<id>/revert/<log_id> — revert to backup
 """
 
+import base64
 import bcrypt
+import hashlib
 import json
 import logging
+import os
 import secrets
 import urllib.request
 import urllib.error
 
 from datetime import datetime, timezone
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 
 from models import Host, TrackedApp, UpdateLog, db
 from utils import clamp, now_str, require_auth
@@ -35,7 +38,7 @@ AGENT_TIMEOUT = 10  # seconds
 # ── Token helpers ──────────────────────────────────────────────────────────────
 
 def _generate_token() -> str:
-    """Generate a random 32-hex token with vigil- prefix."""
+    """Generate a cryptographically random token with vigil- prefix."""
     return "vigil-" + secrets.token_hex(32)
 
 
@@ -48,6 +51,96 @@ def _check_token(plain: str, hashed: str) -> bool:
         return bcrypt.checkpw(plain.encode(), hashed.encode())
     except Exception:
         return False
+
+
+# ── Encryption helpers ─────────────────────────────────────────────────────────
+# Agent tokens are stored encrypted at rest using AES-256-GCM.
+# The encryption key is derived from Flask's SECRET_KEY via SHA-256 —
+# no extra secrets to manage, and the key is never stored anywhere.
+# Losing SECRET_KEY means losing access to stored tokens (they must be
+# regenerated), which is acceptable — the same is true of sessions.
+
+def _derive_encryption_key() -> bytes:
+    """Derive a 32-byte AES key from Flask's SECRET_KEY using SHA-256."""
+    secret = current_app.config["SECRET_KEY"]
+    if isinstance(secret, str):
+        secret = secret.encode()
+    return hashlib.sha256(b"vigil-token-enc-v1:" + secret).digest()
+
+
+def _encrypt_token(plaintext: str) -> str:
+    """
+    Encrypt a token with AES-256-GCM.
+    Returns a base64-encoded string: nonce(12) + ciphertext + tag(16).
+    Falls back to a clearly-marked plaintext envelope if cryptography
+    package is unavailable, with a logged warning.
+    """
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        key   = _derive_encryption_key()
+        nonce = os.urandom(12)
+        ct    = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
+        raw   = nonce + ct                         # nonce(12) + ct + tag(16)
+        return "enc1:" + base64.b64encode(raw).decode()
+    except ImportError:
+        log.warning(
+            "cryptography package not installed — agent token stored in plaintext. "
+            "Install it: pip install cryptography"
+        )
+        return "plain:" + plaintext
+
+
+def _decrypt_token(stored: str) -> str | None:
+    """
+    Decrypt a token stored by _encrypt_token.
+    Returns plaintext string or None on failure.
+    Handles both encrypted ('enc1:') and legacy plaintext ('plain:') formats.
+    """
+    if stored.startswith("plain:"):
+        return stored[6:]
+
+    if not stored.startswith("enc1:"):
+        # Legacy: stored before encryption was added — treat as plaintext
+        return stored
+
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        key  = _derive_encryption_key()
+        raw  = base64.b64decode(stored[5:])
+        nonce, ct = raw[:12], raw[12:]
+        return AESGCM(key).decrypt(nonce, ct, None).decode()
+    except ImportError:
+        log.error("cryptography package not installed — cannot decrypt agent token.")
+        return None
+    except Exception as e:
+        log.error("Token decryption failed: %s", e)
+        return None
+
+
+# ── Token persistence (encrypted) ─────────────────────────────────────────────
+
+def _store_token(host_id: int, token: str) -> None:
+    """Store an agent token encrypted in the Settings table."""
+    from models import Settings
+    Settings.set(f"host_{host_id}_token", _encrypt_token(token))
+
+
+def _get_token(host_id: int) -> str | None:
+    """Retrieve and decrypt an agent token from the Settings table."""
+    from models import Settings
+    stored = Settings.get(f"host_{host_id}_token")
+    if not stored:
+        return None
+    return _decrypt_token(stored)
+
+
+def _delete_token(host_id: int) -> None:
+    """Remove a stored agent token."""
+    from models import Settings, db
+    row = db.session.get(Settings, f"host_{host_id}_token")
+    if row:
+        db.session.delete(row)
+        db.session.commit()
 
 
 # ── Agent communication ────────────────────────────────────────────────────────
@@ -99,31 +192,6 @@ def _agent_health(host: Host, token: str) -> dict:
         raise RuntimeError(str(e))
 
 
-# ── Host token storage helper ──────────────────────────────────────────────────
-# We store the token hash in the DB. The plaintext is shown once at creation
-# time and never stored. For agent calls we need the plaintext — it is stored
-# transiently in the Settings table under key "host_<id>_token" (plaintext,
-# separate from the hash). This lets Vigil make agent calls without storing
-# the plaintext alongside the hash in the same row.
-
-def _store_plaintext_token(host_id: int, token: str):
-    from models import Settings
-    Settings.set(f"host_{host_id}_token", token)
-
-
-def _get_plaintext_token(host_id: int) -> str | None:
-    from models import Settings
-    return Settings.get(f"host_{host_id}_token")
-
-
-def _delete_plaintext_token(host_id: int):
-    from models import Settings, db
-    row = db.session.get(Settings, f"host_{host_id}_token")
-    if row:
-        db.session.delete(row)
-        db.session.commit()
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # HOST CRUD
 # ══════════════════════════════════════════════════════════════════════════════
@@ -170,7 +238,7 @@ def create_host():
     )
     db.session.add(host)
     db.session.commit()
-    _store_plaintext_token(host.id, token)
+    _store_token(host.id, token)
 
     d = host.to_dict()
     d["token"]     = token   # shown once
@@ -207,7 +275,7 @@ def delete_host(host_id):
     if err:
         return err
     host = db.get_or_404(Host, host_id)
-    _delete_plaintext_token(host.id)
+    _delete_token(host.id)
     # unlink apps
     for app in TrackedApp.query.filter_by(host_id=host.id).all():
         app.host_id = None
@@ -222,7 +290,7 @@ def test_host(host_id):
     if err:
         return err
     host  = db.get_or_404(Host, host_id)
-    token = _get_plaintext_token(host.id)
+    token = _get_token(host.id)
     if not token:
         return jsonify({"error": "Token not available. Regenerate the token."}), 400
     try:
@@ -248,7 +316,7 @@ def regenerate_token(host_id):
     host.token_hash = _hash_token(token)
     host.status     = "unknown"
     db.session.commit()
-    _store_plaintext_token(host.id, token)
+    _store_token(host.id, token)
 
     return jsonify({"token": token, "message": "Token regenerated. Update the agent config with the new token."})
 
@@ -277,7 +345,7 @@ def trigger_update(app_id):
     if not host:
         return jsonify({"error": "Linked host not found."}), 404
 
-    token = _get_plaintext_token(host.id)
+    token = _get_token(host.id)
     if not token:
         return jsonify({"error": "Agent token unavailable. Regenerate the host token."}), 400
 
@@ -445,7 +513,7 @@ def revert_update(app_id, log_id):
         return jsonify({"error": "Host or install path not configured."}), 400
 
     host  = db.session.get(Host, entry.host_id)
-    token = _get_plaintext_token(host.id) if host else None
+    token = _get_token(host.id) if host else None
     if not host or not token:
         return jsonify({"error": "Host or token unavailable."}), 400
 

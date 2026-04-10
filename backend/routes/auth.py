@@ -168,7 +168,7 @@ def _clear_totp_pending():
 def _promote_session(user: User):
     """Upgrade a pending TOTP session (or a fresh login) to a full session."""
     _clear_totp_pending()
-    session.permanent  = False
+    session.permanent  = True   # enables PERMANENT_SESSION_LIFETIME idle timeout
     session["user_id"] = user.id
 
 

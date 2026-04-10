@@ -15,6 +15,7 @@ Default credentials: admin / admin  (forced change on first login)
 import logging
 import os
 import secrets
+from datetime import timedelta
 
 from flask import Flask
 from flask_cors import CORS
@@ -53,11 +54,14 @@ def create_app() -> Flask:
         flask_app.config["SECRET_KEY"] = key
 
     # ── Session / cookie security ──────────────────────────────────────────────
-    # Set SECURE_COOKIES=true when running behind a TLS reverse proxy
-    # (Nginx Proxy Manager, Traefik, Caddy, etc.).
-    flask_app.config["SESSION_COOKIE_HTTPONLY"] = True
-    flask_app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    flask_app.config["SESSION_COOKIE_SECURE"]   = (
+    # Set SECURE_COOKIES=true when running behind a TLS reverse proxy.
+    # SESSION_LIFETIME_HOURS controls idle timeout (default 12h).
+    # Set to a lower value (e.g. 1) for tighter security on shared machines.
+    _session_hours = int(os.getenv("SESSION_LIFETIME_HOURS", "12"))
+    flask_app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=_session_hours)
+    flask_app.config["SESSION_COOKIE_HTTPONLY"]    = True
+    flask_app.config["SESSION_COOKIE_SAMESITE"]    = "Lax"
+    flask_app.config["SESSION_COOKIE_SECURE"]      = (
         os.getenv("SECURE_COOKIES", "").lower() in ("1", "true", "yes")
     )
 

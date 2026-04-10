@@ -56,25 +56,24 @@ Traffic between Vigil and the agent travels over HTTP, not HTTPS. This means:
 
 ---
 
-### 2. Agent token stored in plaintext in the database
+### 2. ~~Agent token stored in plaintext in the database~~ — Fixed in v2.2
 
-Vigil needs the plaintext agent token to include in outbound HTTP headers when calling the agent. That plaintext is stored in the SQLite database in the `settings` table under the key `host_<id>_token`.
+Previously, agent tokens were stored in plaintext in the SQLite `settings` table. As of v2.2, tokens are encrypted at rest using **AES-256-GCM** with a key derived from Flask's `SECRET_KEY` via SHA-256. The plaintext is decrypted in memory only when an outbound agent call is made, then immediately discarded.
 
-This means: if someone can read your Vigil database file, they get all agent tokens in plaintext.
+**What this means:** If someone extracts the database file, they get ciphertext, not tokens. Without the `SECRET_KEY` (stored separately in `.secret_key` in the data volume), the tokens cannot be decrypted.
 
-The bcrypt hash in the `hosts` table is used for a separate purpose (verifying tokens sent *to* Vigil from external callers) and does not protect the stored plaintext.
-
-**What to do:** Protect your Vigil data volume with proper filesystem permissions. Do not expose the container's data directory. Treat the database file like you'd treat a file containing passwords.
-
-**Roadmap:** Encrypt stored tokens at rest using a key derived from the `SECRET_KEY` (planned for v2.1).
+**What to do:** Protect your data volume. The `SECRET_KEY` file is as sensitive as the database itself — losing it means losing access to all stored agent tokens (they can be regenerated) but also means existing encrypted tokens are permanently unreadable.
 
 ---
 
-### 3. No session idle timeout
+### 3. No session idle timeout — Fixed in v2.2
 
-Sessions persist until the browser closes or the user explicitly logs out. There is no automatic expiry after a period of inactivity.
+Previously sessions persisted indefinitely until the browser closed or the user logged out. As of v2.2, sessions expire after **12 hours of inactivity** by default.
 
-**What to do:** Log out when you're done, especially on shared machines. Enable 2FA — a stolen session cookie is significantly less useful if the attacker also needs your authenticator app.
+Configure via the `SESSION_LIFETIME_HOURS` environment variable in your `.env` file:
+- `SESSION_LIFETIME_HOURS=12` — default, suitable for most home setups
+- `SESSION_LIFETIME_HOURS=1` — tighter, good for internet-facing deployments
+- `SESSION_LIFETIME_HOURS=168` — one week, for single-user machines where convenience matters more
 
 ---
 
@@ -174,8 +173,9 @@ To be completely transparent:
 
 - Vigil has not been audited by an independent security firm.
 - Docker images are not scanned automatically in CI for base image vulnerabilities.
-- Python and frontend dependencies are not yet pinned with hash verification.
+- Python backend dependencies are pinned to exact versions but not yet verified with `--require-hashes`. Frontend dependencies are pinned to exact versions in `package.json`.
 - No penetration testing has been performed. The findings in this document are from a self-conducted code review.
+- Agent communication is still plain HTTP (token travels in plaintext on the LAN). Mutual TLS is planned for v2.3.
 
 We are a small open-source project. We document what we know, fix issues promptly, and tell you the truth. We are not claiming enterprise-grade security — if that's what you need, this is probably not the right tool. If homelab-grade, honestly documented security is enough for your use case, Vigil tries hard to get that right.
 
@@ -197,6 +197,10 @@ We will acknowledge within 48 hours and aim to release a fix within 14 days for 
 
 | Version | Change |
 |---|---|
+| v2.2 | Agent tokens encrypted at rest with AES-256-GCM — key derived from `SECRET_KEY`, never stored |
+| v2.2 | Session idle timeout — configurable via `SESSION_LIFETIME_HOURS` env var (default 12h) |
+| v2.2 | Frontend dependencies pinned to exact versions — no `^` or `~` ranges |
+| v2.2 | Backend `cryptography` package added and pinned — required for token encryption |
 | v2.0 | Backup codes migrated from SHA-256 to bcrypt with backwards compatibility for existing installs |
 | v2.0 | Agent token comparison uses `hmac.compare_digest` — constant-time, not vulnerable to timing attacks |
 | v2.0 | Agent request body capped at 10 MB — oversized requests rejected before processing |
