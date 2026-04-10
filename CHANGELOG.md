@@ -4,6 +4,73 @@ All notable changes to Vigil will be documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [2.2] — 2026-04-09
+
+## Security
+- Agent tokens encrypted at rest — tokens stored in the database are
+now encrypted with AES-256-GCM. The encryption key is derived from
+Flask's SECRET_KEY via SHA-256 — no new secrets to manage. Plaintext
+is decrypted in memory only when an outbound agent call is made, then
+immediately discarded. Legacy plaintext tokens are still readable for
+zero-downtime upgrades.
+- Session idle timeout — sessions now expire after 12 hours of
+inactivity by default. Configurable via SESSION_LIFETIME_HOURS in
+.env. Set to 1 for tighter security on internet-facing deployments.
+- Frontend dependencies pinned — all frontend packages locked to exact
+versions in package.json (removed ^ ranges). Backend was already
+pinned.
+- cryptography package added — pinned to 44.0.2 in
+requirements.txt, used for AES-256-GCM token encryption.
+Known limitations (documented in SECURITY.md — planned for v2.3)
+Agent communication is still plain HTTP — token travels encrypted in
+the database but in plaintext on the network. Mutual TLS with a Private
+CA is the planned fix for v2.3.
+
+## [2.1] — 2026-04-06
+
+### Security
+- Agent token comparison now uses `hmac.compare_digest` — constant-time,
+  not vulnerable to timing-based guessing attacks
+- Backup codes migrated from SHA-256 to bcrypt (cost 10) with full
+  backwards compatibility for existing installs
+- Agent request body capped at 10 MB — oversized requests rejected before
+  any processing
+- YAML validation is now strictly required before the agent writes any
+  compose file — refuses with a clear error if PyYAML is not installed
+- URL fields (`app_url`, `version_source_url`) validated server-side to
+  only accept `http://` and `https://` schemes
+- Regex compose file patching replaced with lambda substitution — prevents
+  backreference injection from malformed version strings
+- SECURITY.md fully rewritten — honest, plain-language disclosure of what
+  Vigil protects, known limitations, deployment recommendations, and
+  what the agent can and cannot do
+
+### Agent installer
+- New run mode selection: dedicated user (recommended) vs root, with full
+  risk disclosure and required confirmation for root mode
+- Custom agent username — users can name the system account to match their
+  own naming conventions (default: `vigil-agent`)
+- Preflight checks before any configuration is collected:
+  - Python 3 presence and version
+  - Docker presence and version
+  - Docker group existence — offers to create it if missing, with socket
+    permission fix
+  - Docker socket accessibility and group ownership
+  - Port availability check before installation
+- All inputs validated with retry loops — invalid IP addresses, non-numeric
+  ports, out-of-range ports, and malformed tokens are rejected with clear
+  messages instead of silently accepted
+- Installer offers to create the `allowed_base` directory if it doesn't exist
+- If the agent service fails to start, the last 10 log lines are shown
+  inline instead of just printing a warning
+- Version string updated to 2.0 in agent health endpoint
+
+### Known limitations (documented, not yet fixed — planned v2.2)
+- Agent communication is plain HTTP — token travels in plaintext on the LAN
+- Agent token stored in plaintext in the Vigil database (needed for outbound calls)
+- No session idle timeout
+- Dependencies not yet pinned with hash verification
+
 ## [2.0] — 2026-04-05
 
 ### Added — Remote agent system
