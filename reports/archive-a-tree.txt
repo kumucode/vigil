@@ -1,0 +1,111 @@
+ARCHIVE A — vigil-v2_3.zip (actual: v2.5 backend + monolith frontend)
+==================================================================
+
+DIRECTORY STRUCTURE
+------------------
+
+/.env.example
+/.gitignore
+/CHANGELOG.md
+/README.md
+/SECURITY.md
+/SESSION_MEMORY.md
+/agent
+/agent/install.sh
+/agent/uninstall.sh
+/agent/vigil-agent.py
+/backend
+/backend/Dockerfile
+/backend/__pycache__
+/backend/_default_logo.py
+/backend/app.py
+/backend/ca.py
+/backend/categories.py
+/backend/config.py
+/backend/entrypoint.sh
+/backend/migrations.py
+/backend/models.py
+/backend/requirements.txt
+/backend/routes
+/backend/routes/__init__.py
+/backend/routes/__pycache__
+/backend/routes/apps.py
+/backend/routes/auth.py
+/backend/routes/hosts.py
+/backend/routes/settings.py
+/backend/scheduler.py
+/backend/services
+/backend/services/__init__.py
+/backend/services/__pycache__
+/backend/services/agent_client.py
+/backend/services/notifications.py
+/backend/services/update_executor.py
+/backend/services/version_checker.py
+/backend/utils.py
+/docker-compose.yml
+/docs
+/docs/screenshots
+/docs/screenshots/Dashboard-dark-mode.png
+/docs/screenshots/Dashboard-light-mode.png
+/docs/screenshots/List-view.png
+/docs/screenshots/Settings.png
+/docs/screenshots/Table-view.png
+/docs/screenshots/Telegram-menu.png
+/frontend
+/frontend/Dockerfile
+/frontend/index.html
+/frontend/nginx-spa.conf
+/frontend/package.json
+/frontend/src
+/frontend/src/App.jsx
+/frontend/src/main.jsx
+/frontend/vite.config.js
+/install.sh
+/nginx
+/nginx/default.conf
+/vigil-architecture-inventory.md
+/vigil-architecture-mapping.md
+/vigil-dead-code-analysis.md
+/vigil-dependency-risk-audit.md
+/vigil-refactor-execution-plan.md
+/vigil-stabilization-review.md
+/vigil-target-architecture.md
+/vigil-v2.5-rc-validation.md
+
+KEY FILE LINE COUNTS
+--------------------
+scheduler.py:         143
+routes/hosts.py:      479
+routes/apps.py:       466
+routes/auth.py:       389
+routes/settings.py:   185
+migrations.py:        446
+App.jsx:              4515
+main.jsx:             9
+
+SERVICES/
+  agent_client.py: 127 lines
+  notifications.py: 376 lines
+  update_executor.py: 218 lines
+  version_checker.py: 622 lines
+
+PACKAGE VERSION
+  "version": "2.3.0",
+
+MIGRATION VERSION
+                  19: migration_19}
+LATEST_VERSION = max(MIGRATIONS.keys())
+        if current >= LATEST_VERSION:
+        log.info("Running migrations v%d → v%d", current, LATEST_VERSION)
+        log.info("All migrations done — schema at v%d.", LATEST_VERSION)
+
+VALIDATION CHECKS
+scheduler.py ≈143:    143 lines — PASS
+routes/hosts.py ≈479: 479 lines — PASS
+services/version_checker.py: PRESENT
+services/notifications.py:   PRESENT
+services/agent_client.py:    PRESENT
+services/update_executor.py: PRESENT
+migration v19:               PRESENT
+hooks/ in frontend:          ABSENT
+dialogs/ in frontend:        ABSENT

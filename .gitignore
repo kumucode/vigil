@@ -1,6 +1,5 @@
 # Environment — never commit real credentials
 .env
-.log
 
 # Python
 __pycache__/
@@ -31,4 +30,3 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-*.zip

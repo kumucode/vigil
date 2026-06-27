@@ -5,7 +5,6 @@ routes/settings.py — Settings, notifications, health.
   GET    /api/settings
   POST   /api/settings
   POST   /api/settings/test-telegram
-  POST   /api/scan-summary
 """
 
 import base64
@@ -28,6 +27,20 @@ bp  = Blueprint("settings", __name__)
 @bp.get("/api/health")
 def health():
     return jsonify({"status": "ok", "scheduler": get_scheduler_status()})
+
+
+# ── Public branding (no auth required) ───────────────────────────────────────
+
+@bp.get("/api/settings/branding")
+def get_branding():
+    """Public endpoint — returns only visual branding (name, logo, accent).
+    Called before authentication so the login and change-password screens
+    show the correct custom branding."""
+    return jsonify({
+        "app_name":   Settings.get("app_name",   "Vigil"),
+        "app_logo":   Settings.get("app_logo",   ""),
+        "app_accent": Settings.get("app_accent", "#A0A0B8"),
+    })
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -125,7 +138,7 @@ def test_telegram():
     if not chat_id:
         return jsonify({"error": "No Chat ID configured. Enter your Chat ID first."}), 400
 
-    from scheduler import send_telegram
+    from services.notifications import send_telegram
     try:
         send_telegram(token, chat_id,
                       "✅ *Vigil test notification*\n"
@@ -135,35 +148,52 @@ def test_telegram():
         return jsonify({"error": str(exc)}), 502
 
 
-# ── Scan summary (called by scheduler after a full check run) ─────────────────
+@bp.get("/agent/install.sh")
+def serve_agent_installer():
+    """Serve the agent install script directly from Vigil."""
+    import os
+    from flask import send_file, abort
+    candidates = [
+        "/app/agent/install.sh",
+        os.path.join(os.path.dirname(__file__), "..", "..", "agent", "install.sh"),
+        "/opt/vigil/agent/install.sh",
+    ]
+    for path in candidates:
+        path = os.path.normpath(path)
+        if os.path.exists(path):
+            return send_file(path, mimetype="text/plain")
+    abort(404, "install.sh not found")
 
-@bp.post("/api/scan-summary")
-def scan_summary():
-    _, err = require_auth()
-    if err:
-        return err
-    if Settings.get("scan_summary_notify", "off") != "on":
-        return jsonify({"status": "disabled"})
 
-    token   = Settings.get("telegram_token",  "")
-    chat_id = Settings.get("telegram_chat_id", "")
-    if not token or not chat_id:
-        return jsonify({"status": "no_credentials"})
+@bp.get("/agent/vigil-agent.py")
+def serve_agent_script():
+    """Serve the agent Python script directly from Vigil."""
+    import os
+    from flask import send_file, abort
+    candidates = [
+        "/app/agent/vigil-agent.py",
+        os.path.join(os.path.dirname(__file__), "..", "..", "agent", "vigil-agent.py"),
+        "/opt/vigil/agent/vigil-agent.py",
+    ]
+    for path in candidates:
+        path = os.path.normpath(path)
+        if os.path.exists(path):
+            return send_file(path, mimetype="text/plain")
+    abort(404, "vigil-agent.py not found")
 
-    apps     = TrackedApp.query.all()
-    outdated = [a for a in apps if a.status == "outdated"]
-    errors   = [a for a in apps if a.status == "error"]
-    lines    = [f"📊 *Vigil scan complete* — {now_str()[:10]}"]
-    if outdated:
-        lines.append(f"🔴 {len(outdated)} outdated: " + ", ".join(a.name for a in outdated[:10]))
-    if errors:
-        lines.append(f"⚠️ {len(errors)} errors: "    + ", ".join(a.name for a in errors[:5]))
-    if not outdated and not errors:
-        lines.append("✅ All apps are up to date.")
 
-    from scheduler import send_telegram
-    try:
-        send_telegram(token, chat_id, "\n".join(lines))
-    except Exception as exc:
-        log.error("scan_summary telegram error: %s", exc)
-    return jsonify({"status": "sent"})
+@bp.get("/agent/uninstall.sh")
+def serve_agent_uninstaller():
+    """Serve the agent uninstall script directly from Vigil."""
+    import os
+    from flask import send_file, abort
+    candidates = [
+        "/app/agent/uninstall.sh",
+        os.path.join(os.path.dirname(__file__), "..", "..", "agent", "uninstall.sh"),
+        "/opt/vigil/agent/uninstall.sh",
+    ]
+    for path in candidates:
+        path = os.path.normpath(path)
+        if os.path.exists(path):
+            return send_file(path, mimetype="text/plain")
+    abort(404, "uninstall.sh not found")

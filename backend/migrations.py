@@ -327,12 +327,93 @@ def migration_17(conn, insp):
             log.info("  [v17] tracked_apps.%s", col)
 
 
+def migration_18(conn, insp):
+    """Add TLS support columns to hosts and create install_tokens table."""
+    # Add cert_fingerprint and tls_enabled to hosts table
+    for col, defn in [
+        ("cert_fingerprint", "VARCHAR(200)"),
+        ("tls_enabled",      "INTEGER NOT NULL DEFAULT 0"),
+    ]:
+        if not _col_exists(insp, "hosts", col):
+            conn.execute(sa.text(f"ALTER TABLE hosts ADD COLUMN {col} {defn}"))
+            log.info("  [v18] hosts.%s", col)
+
+    # Create install_tokens table for short-lived agent provisioning tokens
+    if "install_tokens" not in insp.get_table_names():
+        conn.execute(sa.text("""
+            CREATE TABLE install_tokens (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash    VARCHAR(200) NOT NULL,
+                dec_key_hash  VARCHAR(200) NOT NULL,
+                host_id       INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+                created_at    VARCHAR(30) NOT NULL,
+                expires_at    VARCHAR(30) NOT NULL,
+                used          INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        log.info("  [v18] created install_tokens table")
+
+
+def migration_19(conn, insp):
+    """
+    Make hosts.token_hash nullable.
+
+    token_hash is a bcrypt hash that was written on host create/regenerate but
+    is never read for authentication (auth uses the AES-256-GCM encrypted token
+    in the settings table). Stopping writes to this column requires it to accept
+    NULL, which SQLite cannot achieve via ALTER COLUMN — requires a table rebuild.
+
+    After this migration, new code no longer writes token_hash. Existing rows
+    retain their old bcrypt hash values harmlessly. The column will be dropped
+    in a future migration once a full release cycle has confirmed no reader exists.
+
+    See: vigil-dead-code-analysis.md CC-19, vigil-refactor-execution-plan.md P4b.
+    """
+    # Check whether the column is already nullable by inspecting its definition.
+    # SQLite's column info 'notnull' field: 1 = NOT NULL, 0 = nullable.
+    cols = {c["name"]: c for c in insp.get_columns("hosts")}
+    if "token_hash" not in cols:
+        log.info("  [v19] hosts.token_hash already absent — skip")
+        return
+
+    if not cols["token_hash"]["nullable"] is False and not cols["token_hash"].get("notnull", False):
+        # Already nullable — idempotent exit
+        log.info("  [v19] hosts.token_hash already nullable — skip")
+        return
+
+    # SQLite table-rebuild pattern to change column nullability.
+    # All existing data is preserved exactly.
+    conn.execute(sa.text("""
+        CREATE TABLE hosts_v19 (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             VARCHAR(100) NOT NULL,
+            ip               VARCHAR(100) NOT NULL,
+            port             INTEGER NOT NULL DEFAULT 7777,
+            token_hash       VARCHAR(200),
+            allowed_base     VARCHAR(500) NOT NULL DEFAULT '/home',
+            last_seen        VARCHAR(40),
+            status           VARCHAR(20) NOT NULL DEFAULT 'unknown',
+            created_at       DATETIME,
+            cert_fingerprint VARCHAR(200),
+            tls_enabled      INTEGER NOT NULL DEFAULT 0
+        )
+    """))
+    conn.execute(sa.text(
+        "INSERT INTO hosts_v19 SELECT id,name,ip,port,token_hash,allowed_base,"
+        "last_seen,status,created_at,cert_fingerprint,tls_enabled FROM hosts"
+    ))
+    conn.execute(sa.text("DROP TABLE hosts"))
+    conn.execute(sa.text("ALTER TABLE hosts_v19 RENAME TO hosts"))
+    log.info("  [v19] hosts.token_hash made nullable (table rebuild)")
+
+
 MIGRATIONS     = {1:  migration_1,  2:  migration_2,  3:  migration_3,
                   4:  migration_4,  5:  migration_5,  6:  migration_6,
                   7:  migration_7,  8:  migration_8,  9:  migration_9,
                   10: migration_10, 11: migration_11, 12: migration_12,
                   13: migration_13, 14: migration_14, 15: migration_15,
-                  16: migration_16, 17: migration_17}
+                  16: migration_16, 17: migration_17, 18: migration_18,
+                  19: migration_19}
 LATEST_VERSION = max(MIGRATIONS.keys())
 
 

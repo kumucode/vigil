@@ -103,10 +103,22 @@ def _safe_path(directory: str) -> Path | None:
 def _backup(compose_path: Path) -> str:
     """Create a timestamped backup and return its path string."""
     backup_dir = compose_path.parent / BACKUP_DIR
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    ts      = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-    dest    = backup_dir / f"docker-compose.{ts}.yml"
-    shutil.copy2(compose_path, dest)
+    try:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise PermissionError(
+            f"Cannot create backup directory {backup_dir}. "
+            f"Run: sudo mkdir -p {backup_dir} && sudo chown vigil-agent:vigil-agent {backup_dir}"
+        )
+    ts   = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    dest = backup_dir / f"docker-compose.{ts}.yml"
+    try:
+        shutil.copy2(compose_path, dest)
+    except PermissionError:
+        raise PermissionError(
+            f"Cannot write backup to {dest}. "
+            f"Run: sudo chown -R vigil-agent:vigil-agent {backup_dir}"
+        )
     _prune_backups(backup_dir)
     log.info("Backed up %s → %s", compose_path, dest)
     return str(dest)
@@ -217,7 +229,13 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": f"No docker-compose.yml found in {safe_dir}"})
             return
 
-        content = compose_path.read_text()
+        try:
+            content = compose_path.read_text()
+        except PermissionError:
+            self._send(403, {"error":
+                f"Permission denied reading {compose_path}. "
+                f"Run: sudo chmod o+r {compose_path}"})
+            return
         self._send(200, {"content": content, "path": str(compose_path)})
 
     def _handle_write(self):
@@ -264,7 +282,13 @@ class AgentHandler(BaseHTTPRequestHandler):
             return
 
         backup_path = _backup(compose_path)
-        compose_path.write_text(content)
+        try:
+            compose_path.write_text(content)
+        except PermissionError:
+            self._send(403, {"error":
+                f"Permission denied writing {compose_path}. "
+                f"Run: sudo chown vigil-agent:vigil-agent {compose_path}"})
+            return
         log.info("Wrote %s", compose_path)
 
         try:
@@ -320,11 +344,50 @@ class AgentHandler(BaseHTTPRequestHandler):
         self._send(200, {"status": "reverted", "backup_path": new_backup, "output": output[:500]})
 
 
+# ── TLS setup ─────────────────────────────────────────────────────────────────
+
+CERT_FILE = Path("/etc/vigil-agent/agent.crt")
+KEY_FILE  = Path("/etc/vigil-agent/agent.key")
+CA_FILE   = Path("/etc/vigil-agent/vigil-ca.crt")
+
+TLS_AVAILABLE = CERT_FILE.exists() and KEY_FILE.exists() and CA_FILE.exists()
+
+
+def _build_tls_context() -> "ssl.SSLContext | None":
+    """
+    Build a mutual TLS context.  Agent presents its own cert (signed by
+    Vigil's CA) and requires the caller to present a cert signed by the
+    same CA.  Returns None if cert files are missing.
+    """
+    if not TLS_AVAILABLE:
+        return None
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(CERT_FILE), str(KEY_FILE))
+    ctx.load_verify_locations(str(CA_FILE))
+    ctx.verify_mode    = ssl.CERT_REQUIRED
+    ctx.check_hostname = False
+    return ctx
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    server = HTTPServer((BIND_ADDR, PORT), AgentHandler)
-    log.info("Vigil agent listening on %s:%d", BIND_ADDR, PORT)
+    server  = HTTPServer((BIND_ADDR, PORT), AgentHandler)
+    ssl_ctx = _build_tls_context()
+
+    if ssl_ctx:
+        server.socket = ssl_ctx.wrap_socket(server.socket, server_side=True)
+        log.info("Vigil agent listening on %s:%d (TLS enabled — mutual auth)",
+                 BIND_ADDR, PORT)
+    else:
+        log.warning(
+            "TLS certificates not found — starting in plain HTTP mode. "
+            "Run the installer to provision certificates for encrypted communication."
+        )
+        log.info("Vigil agent listening on %s:%d (plain HTTP — upgrade recommended)",
+                 BIND_ADDR, PORT)
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

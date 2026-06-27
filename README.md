@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/kumucode/vigil/blob/main/official-icon.png" alt="Vigil logo" width="300" height="270"/>
+<img src="https://github.com/username/vigil/blob/main/official-icon.png" alt="Vigil logo" width="300" height="270"/>
 
 # Vigil
 
@@ -8,7 +8,7 @@
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
-[![Version](https://img.shields.io/badge/version-2.2-e0a83c.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.3-e0a83c.svg)](./CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-alpha-e05c5c.svg)](#alpha-notice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5865F2.svg)](./LICENSE)
 [![Docker Compose](https://img.shields.io/badge/deploy-docker%20compose-2496ED.svg)](./docker-compose.yml)
@@ -19,7 +19,7 @@ Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
 ---
 
-> **⚠️ Alpha release — v1.0**
+> **⚠️ Alpha release — vv1.0**
 >
 > Vigil is functional and has been tested in real self-hosted environments,
 > but it is still early software. You may encounter rough edges. If you do,

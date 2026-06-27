@@ -1,5 +1,5 @@
 """
-routes/hosts.py — Remote host (agent) management and update execution.
+routes/hosts.py — Remote host and agent management HTTP endpoints.
 
   GET    /api/hosts
   POST   /api/hosts
@@ -8,60 +8,48 @@ routes/hosts.py — Remote host (agent) management and update execution.
   POST   /api/hosts/<id>/test
   POST   /api/hosts/<id>/regenerate-token
 
-  POST   /api/apps/<id>/update        — trigger update via agent
-  GET    /api/apps/<id>/logs          — update history
+  POST   /api/apps/<id>/update          — trigger update via agent
+  GET    /api/apps/<id>/logs            — update history
   POST   /api/apps/<id>/revert/<log_id> — revert to backup
+  DELETE /api/apps/<id>/logs            — clear update history
+
+  GET    /api/hosts/ca-fingerprint
+  POST   /api/hosts/<id>/generate-install-token
+  POST   /api/agent-provision           — public (no auth)
+  POST   /api/hosts/<id>/confirm-tls
+
+Responsibility: request validation · authorization · response generation.
+All operational logic lives in services/agent_client.py and
+services/update_executor.py.
 """
 
 import base64
 import bcrypt
 import hashlib
-import json
 import logging
 import os
 import secrets
-import urllib.request
-import urllib.error
 
-from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request, current_app
 
 from models import Host, TrackedApp, UpdateLog, db
-from utils import clamp, now_str, require_auth
+from utils import now_str, require_auth
+from services.agent_client import agent_request, agent_health, build_tls_context
+from services.update_executor import execute_update, execute_revert
 
 log = logging.getLogger(__name__)
 bp  = Blueprint("hosts", __name__)
 
-AGENT_TIMEOUT = 10  # seconds
 
-
-# ── Token helpers ──────────────────────────────────────────────────────────────
+# ── Token management ──────────────────────────────────────────────────────────
+# Token storage/retrieval stays here: it is specific to host provisioning and
+# requires current_app (Flask context) for key derivation.
 
 def _generate_token() -> str:
-    """Generate a cryptographically random token with vigil- prefix."""
     return "vigil-" + secrets.token_hex(32)
 
 
-def _hash_token(token: str) -> str:
-    return bcrypt.hashpw(token.encode(), bcrypt.gensalt()).decode()
-
-
-def _check_token(plain: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(plain.encode(), hashed.encode())
-    except Exception:
-        return False
-
-
-# ── Encryption helpers ─────────────────────────────────────────────────────────
-# Agent tokens are stored encrypted at rest using AES-256-GCM.
-# The encryption key is derived from Flask's SECRET_KEY via SHA-256 —
-# no extra secrets to manage, and the key is never stored anywhere.
-# Losing SECRET_KEY means losing access to stored tokens (they must be
-# regenerated), which is acceptable — the same is true of sessions.
-
 def _derive_encryption_key() -> bytes:
-    """Derive a 32-byte AES key from Flask's SECRET_KEY using SHA-256."""
     secret = current_app.config["SECRET_KEY"]
     if isinstance(secret, str):
         secret = secret.encode()
@@ -69,19 +57,12 @@ def _derive_encryption_key() -> bytes:
 
 
 def _encrypt_token(plaintext: str) -> str:
-    """
-    Encrypt a token with AES-256-GCM.
-    Returns a base64-encoded string: nonce(12) + ciphertext + tag(16).
-    Falls back to a clearly-marked plaintext envelope if cryptography
-    package is unavailable, with a logged warning.
-    """
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         key   = _derive_encryption_key()
         nonce = os.urandom(12)
         ct    = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
-        raw   = nonce + ct                         # nonce(12) + ct + tag(16)
-        return "enc1:" + base64.b64encode(raw).decode()
+        return "enc1:" + base64.b64encode(nonce + ct).decode()
     except ImportError:
         log.warning(
             "cryptography package not installed — agent token stored in plaintext. "
@@ -91,23 +72,21 @@ def _encrypt_token(plaintext: str) -> str:
 
 
 def _decrypt_token(stored: str) -> str | None:
-    """
-    Decrypt a token stored by _encrypt_token.
-    Returns plaintext string or None on failure.
-    Handles both encrypted ('enc1:') and legacy plaintext ('plain:') formats.
-    """
     if stored.startswith("plain:"):
+        log.warning("Host token is stored in legacy plain: format. "
+                    "Regenerate the token to upgrade to AES-256-GCM encryption.")
         return stored[6:]
 
     if not stored.startswith("enc1:"):
-        # Legacy: stored before encryption was added — treat as plaintext
+        log.warning("Host token is stored in legacy bare-string format. "
+                    "Regenerate the token to upgrade to AES-256-GCM encryption.")
         return stored
 
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        key  = _derive_encryption_key()
-        raw  = base64.b64decode(stored[5:])
-        nonce, ct = raw[:12], raw[12:]
+        key         = _derive_encryption_key()
+        raw         = base64.b64decode(stored[5:])
+        nonce, ct   = raw[:12], raw[12:]
         return AESGCM(key).decrypt(nonce, ct, None).decode()
     except ImportError:
         log.error("cryptography package not installed — cannot decrypt agent token.")
@@ -117,79 +96,23 @@ def _decrypt_token(stored: str) -> str | None:
         return None
 
 
-# ── Token persistence (encrypted) ─────────────────────────────────────────────
-
 def _store_token(host_id: int, token: str) -> None:
-    """Store an agent token encrypted in the Settings table."""
     from models import Settings
     Settings.set(f"host_{host_id}_token", _encrypt_token(token))
 
 
 def _get_token(host_id: int) -> str | None:
-    """Retrieve and decrypt an agent token from the Settings table."""
     from models import Settings
     stored = Settings.get(f"host_{host_id}_token")
-    if not stored:
-        return None
-    return _decrypt_token(stored)
+    return _decrypt_token(stored) if stored else None
 
 
 def _delete_token(host_id: int) -> None:
-    """Remove a stored agent token."""
-    from models import Settings, db
-    row = db.session.get(Settings, f"host_{host_id}_token")
+    from models import Settings, db as _db
+    row = _db.session.get(Settings, f"host_{host_id}_token")
     if row:
-        db.session.delete(row)
-        db.session.commit()
-
-
-# ── Agent communication ────────────────────────────────────────────────────────
-
-def _agent_url(host: Host, path: str) -> str:
-    return f"http://{host.ip}:{host.port}{path}"
-
-
-def _agent_request(host: Host, path: str, token: str, payload: dict | None = None) -> dict:
-    """
-    Make an HTTP request to the agent.
-    Returns the parsed JSON response or raises on error.
-    """
-    url  = _agent_url(host, path)
-    data = json.dumps(payload or {}).encode()
-    req  = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type":  "application/json",
-            "X-Vigil-Token": token,
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=AGENT_TIMEOUT) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        raise RuntimeError(f"Agent returned {e.code}: {body}")
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Cannot reach agent: {e.reason}")
-    except Exception as e:
-        raise RuntimeError(str(e))
-
-
-def _agent_health(host: Host, token: str) -> dict:
-    """GET /health on the agent — uses urllib directly."""
-    url = _agent_url(host, "/health")
-    req = urllib.request.Request(
-        url,
-        headers={"X-Vigil-Token": token},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=AGENT_TIMEOUT) as resp:
-            return json.loads(resp.read().decode())
-    except Exception as e:
-        raise RuntimeError(str(e))
+        _db.session.delete(row)
+        _db.session.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -201,7 +124,7 @@ def list_hosts():
     _, err = require_auth()
     if err:
         return err
-    hosts = Host.query.order_by(Host.created_at).all()
+    hosts  = Host.query.order_by(Host.created_at).all()
     result = []
     for h in hosts:
         d = h.to_dict()
@@ -226,16 +149,9 @@ def create_host():
 
     port         = int(data.get("port", 7777))
     allowed_base = (data.get("allowed_base") or "/home").strip().rstrip("/") or "/home"
+    token        = _generate_token()
 
-    token      = _generate_token()
-    token_hash = _hash_token(token)
-
-    host = Host(
-        name=name, ip=ip, port=port,
-        token_hash=token_hash,
-        allowed_base=allowed_base,
-        status="unknown",
-    )
+    host = Host(name=name, ip=ip, port=port, allowed_base=allowed_base, status="unknown")
     db.session.add(host)
     db.session.commit()
     _store_token(host.id, token)
@@ -254,12 +170,9 @@ def update_host(host_id):
     host = db.get_or_404(Host, host_id)
     data = request.get_json(silent=True) or {}
 
-    if "name" in data:
-        host.name = (data["name"] or "").strip() or host.name
-    if "ip" in data:
-        host.ip = (data["ip"] or "").strip() or host.ip
-    if "port" in data:
-        host.port = int(data["port"] or 7777)
+    if "name"         in data: host.name         = (data["name"] or "").strip() or host.name
+    if "ip"           in data: host.ip            = (data["ip"]   or "").strip() or host.ip
+    if "port"         in data: host.port          = int(data["port"] or 7777)
     if "allowed_base" in data:
         host.allowed_base = (data["allowed_base"] or "/home").strip().rstrip("/") or "/home"
 
@@ -276,7 +189,6 @@ def delete_host(host_id):
         return err
     host = db.get_or_404(Host, host_id)
     _delete_token(host.id)
-    # unlink apps
     for app in TrackedApp.query.filter_by(host_id=host.id).all():
         app.host_id = None
     db.session.delete(host)
@@ -294,7 +206,7 @@ def test_host(host_id):
     if not token:
         return jsonify({"error": "Token not available. Regenerate the token."}), 400
     try:
-        result = _agent_health(host, token)
+        result     = agent_health(host, token)
         host.status    = "connected"
         host.last_seen = now_str()
         db.session.commit()
@@ -310,19 +222,17 @@ def regenerate_token(host_id):
     _, err = require_auth()
     if err:
         return err
-    host = db.get_or_404(Host, host_id)
-
-    token          = _generate_token()
-    host.token_hash = _hash_token(token)
-    host.status     = "unknown"
+    host        = db.get_or_404(Host, host_id)
+    token       = _generate_token()
+    host.status = "unknown"
     db.session.commit()
     _store_token(host.id, token)
-
-    return jsonify({"token": token, "message": "Token regenerated. Update the agent config with the new token."})
+    return jsonify({"token": token,
+                    "message": "Token regenerated. Update the agent config with the new token."})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# UPDATE EXECUTION
+# UPDATE & REVERT
 # ══════════════════════════════════════════════════════════════════════════════
 
 @bp.post("/api/apps/<int:app_id>/update")
@@ -341,7 +251,7 @@ def trigger_update(app_id):
     if not entry.latest_version:
         return jsonify({"error": "Latest version not known yet. Run a check first."}), 400
 
-    host  = db.session.get(Host, entry.host_id)
+    host = db.session.get(Host, entry.host_id)
     if not host:
         return jsonify({"error": "Linked host not found."}), 404
 
@@ -351,136 +261,19 @@ def trigger_update(app_id):
 
     data         = request.get_json(silent=True) or {}
     triggered_by = data.get("triggered_by", "user")
-    new_version  = entry.latest_version
-    old_version  = entry.version
 
-    # Step 1 — read current compose
     try:
-        read_resp = _agent_request(host, "/read", token, {
-            "path": entry.install_path,
-        })
+        result = execute_update(entry, host, token, triggered_by=triggered_by)
     except RuntimeError as e:
-        return jsonify({"error": f"Could not read compose file: {e}"}), 502
+        return jsonify({"error": str(e)}), 502
 
-    compose_content = read_resp.get("content", "")
-    if not compose_content:
-        return jsonify({"error": "Agent returned empty compose file."}), 502
+    return jsonify({
+        "status": result["status"],
+        "from":   result["from"],
+        "to":     result["to"],
+        "app":    entry.to_dict(),
+    })
 
-    # Step 2 — patch the image tag in the compose content
-    import re
-    image_base  = entry.image
-    old_tag     = old_version
-    new_tag     = new_version
-    # Replace image: <image_base>:<old_tag> with image: <image_base>:<new_tag>
-    # Using a lambda replacement to prevent backreference injection from version strings
-    pattern     = re.compile(
-        r'(image\s*:\s*' + re.escape(image_base) + r')(?::[\w.\-]+)?',
-        re.IGNORECASE
-    )
-    new_content = pattern.sub(lambda m: m.group(1) + ':' + new_tag, compose_content)
-
-    if new_content == compose_content:
-        return jsonify({"error": "Could not find the image in the compose file. Check the image and install path."}), 400
-
-    # Step 3 — write + restart via agent
-    try:
-        write_resp = _agent_request(host, "/write", token, {
-            "path":         entry.install_path,
-            "content":      new_content,
-            "service_name": entry.service_name or "",
-        })
-    except RuntimeError as e:
-        _log_update(app_id, old_version, new_version, "failed", triggered_by, str(e))
-        _notify_action(entry.name, "update", old_version, new_version,
-                       "failed", host_name=host.name, error=str(e))
-        return jsonify({"error": f"Agent write/restart failed: {e}"}), 502
-
-    backup_path = write_resp.get("backup_path", "")
-
-    # Step 4 — update DB
-    entry.version = new_version
-    entry.status  = "up-to-date"
-    db.session.commit()
-
-    _log_update(app_id, old_version, new_version, "success", triggered_by, backup_path=backup_path)
-
-    host.last_seen = now_str()
-    host.status    = "connected"
-    db.session.commit()
-
-    _notify_action(entry.name, "update", old_version, new_version,
-                   "success", host_name=host.name)
-
-    return jsonify({"status": "updated", "from": old_version, "to": new_version, "app": entry.to_dict()})
-
-
-def _log_update(app_id, from_ver, to_ver, status, triggered_by,
-                error=None, backup_path=None, action="update"):
-    entry = UpdateLog(
-        app_id=app_id,
-        timestamp=now_str(),
-        action=action,
-        from_version=from_ver,
-        to_version=to_ver,
-        status=status,
-        triggered_by=triggered_by,
-        error_message=error,
-        backup_path=backup_path,
-    )
-    db.session.add(entry)
-    db.session.commit()
-
-
-def _notify_action(app_name: str, action: str, from_ver: str, to_ver: str,
-                   status: str, host_name: str = "", error: str = ""):
-    """
-    Fire a Telegram + webhook notification after an update or revert action.
-    Runs best-effort — never raises.
-    """
-    try:
-        from models import Settings
-        from scheduler import send_telegram, _send_webhook as send_webhook
-        token   = Settings.get("telegram_token",  "")
-        chat_id = Settings.get("telegram_chat_id", "")
-        webhook = Settings.get("webhook_url", "")
-
-        if action == "update" and status == "success":
-            icon = "✅"
-            verb = "updated"
-        elif action == "revert" and status == "success":
-            icon = "↩️"
-            verb = "reverted"
-        elif status == "failed":
-            icon = "❌"
-            verb = "update failed"
-        else:
-            icon = "ℹ️"
-            verb = action
-
-        lines = [f"{icon} *{app_name}* {verb}"]
-        lines.append(f"{from_ver} → {to_ver}")
-        if host_name:
-            lines.append(f"Host: {host_name}")
-        if error:
-            lines.append(f"Error: {error}")
-
-        msg = "\n".join(lines)
-
-        if token and chat_id:
-            send_telegram(token, chat_id, msg)
-        if webhook:
-            send_webhook(webhook, {"text": msg, "app": app_name,
-                                   "action": action, "status": status,
-                                   "from": from_ver, "to": to_ver})
-    except Exception as exc:
-        log.warning("_notify_action failed: %s", exc)
-
-
-# ── Update log endpoints ───────────────────────────────────────────────────────
-
-# ══════════════════════════════════════════════════════════════════════════════
-# UPDATE LOG & REVERT
-# ══════════════════════════════════════════════════════════════════════════════
 
 @bp.get("/api/apps/<int:app_id>/logs")
 def get_update_logs(app_id):
@@ -502,7 +295,7 @@ def revert_update(app_id, log_id):
     if err:
         return err
 
-    entry    = db.get_or_404(TrackedApp, app_id)
+    entry     = db.get_or_404(TrackedApp, app_id)
     log_entry = db.get_or_404(UpdateLog, log_id)
 
     if log_entry.app_id != app_id:
@@ -518,35 +311,15 @@ def revert_update(app_id, log_id):
         return jsonify({"error": "Host or token unavailable."}), 400
 
     try:
-        resp = _agent_request(host, "/revert", token, {
-            "path":         entry.install_path,
-            "backup_path":  log_entry.backup_path,
-            "service_name": entry.service_name or "",
-        })
+        result = execute_revert(entry, host, token, log_entry)
     except RuntimeError as e:
-        return jsonify({"error": f"Revert failed: {e}"}), 502
+        return jsonify({"error": str(e)}), 502
 
-    revert_to = log_entry.from_version
-    old_ver   = entry.version
-    entry.version = revert_to
-    entry.status  = "up-to-date"
-    db.session.commit()
+    return jsonify({"status": result["status"], "to": result["to"], "app": entry.to_dict()})
 
-    _log_update(app_id, old_ver, revert_to, "success", "user",
-                action="revert", backup_path=resp.get("backup_path"))
-
-    host.last_seen = now_str()
-    host.status    = "connected"
-    db.session.commit()
-
-    _notify_action(entry.name, "revert", old_ver, revert_to,
-                   "success", host_name=host.name)
-
-    return jsonify({"status": "reverted", "to": revert_to, "app": entry.to_dict()})
 
 @bp.delete("/api/apps/<int:app_id>/logs")
 def clear_update_logs(app_id):
-    """Delete all update log entries for an app."""
     _, err = require_auth()
     if err:
         return err
@@ -555,3 +328,152 @@ def clear_update_logs(app_id):
     db.session.commit()
     log.info("Cleared %d log entries for app %d", deleted, app_id)
     return jsonify({"deleted": deleted})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TLS PROVISIONING (v2.3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@bp.get("/api/hosts/ca-fingerprint")
+def get_ca_fingerprint():
+    _, err = require_auth()
+    if err:
+        return err
+    try:
+        from ca import ca_fingerprint
+        return jsonify({"fingerprint": ca_fingerprint()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.post("/api/hosts/<int:host_id>/generate-install-token")
+def generate_install_token(host_id):
+    """
+    Generate a short-lived install token + decryption key for agent provisioning.
+    Both are stored as bcrypt hashes — never in plaintext.
+    Returns plaintext values to display in the wizard (shown once, never stored).
+    """
+    _, err = require_auth()
+    if err:
+        return err
+
+    host = db.get_or_404(Host, host_id)
+
+    from models import InstallToken
+    from datetime import timedelta, timezone
+    from ca import is_public_ip
+
+    # Expire any unused previous tokens for this host
+    InstallToken.query.filter_by(host_id=host_id, used=False).delete()
+
+    raw_token   = "install-" + secrets.token_hex(16)
+    raw_dec_key = secrets.token_hex(16)
+    now         = __import__("datetime").datetime.now(timezone.utc)
+    expires_at  = (now + timedelta(minutes=5)).isoformat()
+
+    it = InstallToken(
+        token_hash   = bcrypt.hashpw(raw_token.encode(),   bcrypt.gensalt()).decode(),
+        dec_key_hash = bcrypt.hashpw(raw_dec_key.encode(), bcrypt.gensalt()).decode(),
+        host_id      = host_id,
+        created_at   = now.isoformat(),
+        expires_at   = expires_at,
+        used         = False,
+    )
+    db.session.add(it)
+    db.session.commit()
+
+    return jsonify({
+        "install_token": raw_token,
+        "dec_key":       raw_dec_key,
+        "expires_at":    expires_at,
+        "public_ip":     is_public_ip(host.ip),
+    })
+
+
+@bp.post("/api/agent-provision")
+def agent_provision():
+    """
+    Public endpoint (no Vigil login required) called by the agent installer.
+    Verifies the install token + dec_key, issues a signed agent certificate,
+    encrypts the package with the dec_key, and returns the blob.
+    Both token and dec_key are single-use. The agent private key is never stored.
+    """
+    data = request.get_json(silent=True) or {}
+
+    raw_token   = (data.get("install_token") or "").strip()
+    raw_dec_key = (data.get("dec_key")       or "").strip()
+
+    if not raw_token or not raw_dec_key:
+        return jsonify({"error": "install_token and dec_key are required"}), 400
+    if not raw_token.startswith("install-") or len(raw_token) != 40:
+        return jsonify({"error": "Invalid install token format"}), 400
+
+    from models import InstallToken, Host as _Host
+    from datetime import datetime, timezone
+
+    candidates = InstallToken.query.filter_by(used=False).all()
+    matched    = None
+    for c in candidates:
+        if c.is_expired():
+            continue
+        if c.check_token(raw_token) and c.check_dec_key(raw_dec_key):
+            matched = c
+            break
+
+    if not matched:
+        log.warning("agent_provision: invalid or expired token attempt")
+        return jsonify({"error": "Invalid, expired, or already-used install token"}), 401
+
+    matched.used = True
+    db.session.commit()
+
+    host = db.session.get(_Host, matched.host_id)
+    if not host:
+        return jsonify({"error": "Host not found"}), 404
+
+    try:
+        from ca import issue_agent_cert, encrypt_cert_package, agent_cert_fingerprint
+        ca_pem, agent_cert_pem, agent_key_pem = issue_agent_cert(host.name, host.ip)
+    except Exception as e:
+        log.error("Certificate issuance failed: %s", e)
+        return jsonify({"error": "Certificate issuance failed — is the CA initialised?"}), 500
+
+    fingerprint           = agent_cert_fingerprint(agent_cert_pem)
+    host.cert_fingerprint = fingerprint
+    db.session.commit()
+
+    try:
+        blob = encrypt_cert_package(ca_pem, agent_cert_pem, agent_key_pem, raw_dec_key)
+    except Exception as e:
+        log.error("Package encryption failed: %s", e)
+        return jsonify({"error": "Encryption failed"}), 500
+
+    del agent_key_pem
+    log.info("Provisioned agent cert for host %d (%s) — fingerprint: %s",
+             host.id, host.name, fingerprint)
+
+    return jsonify({"encrypted_package": blob, "fingerprint": fingerprint})
+
+
+@bp.post("/api/hosts/<int:host_id>/confirm-tls")
+def confirm_tls(host_id):
+    """Called from wizard step 3 after the user confirms fingerprint match."""
+    _, err = require_auth()
+    if err:
+        return err
+
+    host         = db.get_or_404(Host, host_id)
+    data         = request.get_json(silent=True) or {}
+    confirmed_fp = (data.get("fingerprint") or "").strip()
+
+    if not host.cert_fingerprint:
+        return jsonify({"error": "No certificate fingerprint on file — provision the agent first"}), 400
+
+    if confirmed_fp and confirmed_fp != host.cert_fingerprint:
+        log.warning("TLS confirm: fingerprint mismatch for host %d — possible interception", host_id)
+        return jsonify({"error": "Fingerprint mismatch — confirmation rejected"}), 400
+
+    host.tls_enabled = True
+    db.session.commit()
+    log.info("TLS enabled for host %d (%s)", host_id, host.name)
+    return jsonify({"status": "ok", "tls_enabled": True})

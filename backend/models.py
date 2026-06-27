@@ -147,34 +147,70 @@ class TrackedApp(db.Model):
 class Host(db.Model):
     __tablename__ = "hosts"
 
-    id           = db.Column(db.Integer,     primary_key=True)
-    name         = db.Column(db.String(100), nullable=False)
-    ip           = db.Column(db.String(100), nullable=False)
-    port         = db.Column(db.Integer,     nullable=False, default=7777)
-    token_hash   = db.Column(db.String(200), nullable=False)   # bcrypt hash, never plaintext
-    allowed_base = db.Column(db.String(500), nullable=False, default="/home")
-    last_seen    = db.Column(db.String(40),  nullable=True)
-    status       = db.Column(db.String(20),  nullable=False, default="unknown")  # connected/unreachable/unknown
-    created_at   = db.Column(db.DateTime,    default=lambda: datetime.now(timezone.utc))
-
-    def check_token(self, token: str) -> bool:
-        import bcrypt
-        try:
-            return bcrypt.checkpw(token.encode(), self.token_hash.encode())
-        except Exception:
-            return False
+    id                = db.Column(db.Integer,     primary_key=True)
+    name              = db.Column(db.String(100), nullable=False)
+    ip                = db.Column(db.String(100), nullable=False)
+    port              = db.Column(db.Integer,     nullable=False, default=7777)
+    token_hash        = db.Column(db.String(200), nullable=True)    # vestigial bcrypt hash — no longer written (v2.4+); to be dropped in a future migration
+    allowed_base      = db.Column(db.String(500), nullable=False, default="/home")
+    last_seen         = db.Column(db.String(40),  nullable=True)
+    status            = db.Column(db.String(20),  nullable=False, default="unknown")
+    created_at        = db.Column(db.DateTime,    default=lambda: datetime.now(timezone.utc))
+    # TLS fields (v2.3)
+    cert_fingerprint  = db.Column(db.String(200), nullable=True)    # SHA-256 fingerprint of agent cert
+    tls_enabled       = db.Column(db.Boolean,     nullable=False, default=False)
 
     def to_dict(self, include_token_hint=False):
         return {
-            "id":           self.id,
-            "name":         self.name,
-            "ip":           self.ip,
-            "port":         self.port,
-            "allowed_base": self.allowed_base,
-            "last_seen":    self.last_seen,
-            "status":       self.status,
-            "created_at":   self.created_at.isoformat() if self.created_at else None,
+            "id":               self.id,
+            "name":             self.name,
+            "ip":               self.ip,
+            "port":             self.port,
+            "allowed_base":     self.allowed_base,
+            "last_seen":        self.last_seen,
+            "status":           self.status,
+            "tls_enabled":      self.tls_enabled,
+            "cert_fingerprint": self.cert_fingerprint,
+            "created_at":       self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ── Install token (TLS provisioning) ──────────────────────────────────────────
+
+class InstallToken(db.Model):
+    """
+    Short-lived single-use token for agent TLS certificate provisioning.
+    Both token and decryption key are stored as bcrypt hashes — never plaintext.
+    Expires after 5 minutes.  Used flag prevents replay.
+    """
+    __tablename__ = "install_tokens"
+
+    id            = db.Column(db.Integer,     primary_key=True)
+    token_hash    = db.Column(db.String(200), nullable=False)   # bcrypt hash of install token
+    dec_key_hash  = db.Column(db.String(200), nullable=False)   # bcrypt hash of decryption key
+    host_id       = db.Column(db.Integer,     db.ForeignKey("hosts.id", ondelete="CASCADE"), nullable=False)
+    created_at    = db.Column(db.String(30),  nullable=False)
+    expires_at    = db.Column(db.String(30),  nullable=False)
+    used          = db.Column(db.Boolean,     nullable=False, default=False)
+
+    def is_expired(self) -> bool:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        return now > self.expires_at or self.used
+
+    def check_token(self, raw: str) -> bool:
+        import bcrypt
+        try:
+            return bcrypt.checkpw(raw.encode(), self.token_hash.encode())
+        except Exception:
+            return False
+
+    def check_dec_key(self, raw: str) -> bool:
+        import bcrypt
+        try:
+            return bcrypt.checkpw(raw.encode(), self.dec_key_hash.encode())
+        except Exception:
+            return False
 
 
 # ── Update log ─────────────────────────────────────────────────────────────────

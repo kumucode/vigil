@@ -32,7 +32,7 @@ import yaml
 from flask import Blueprint, jsonify, request
 
 from categories import auto_categorize, recategorize_all
-from config import LEN, MAX_ICON_BYTES
+from config import LEN, MAX_ICON_BYTES, SKIP_TAGS
 from models import Category, Settings, TrackedApp, db
 from utils import clamp, now_str, require_auth, require_str
 
@@ -42,11 +42,9 @@ bp  = Blueprint("apps", __name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+# Generic leaf names that are not useful as app names (e.g. registry/server → "registry")
 _GENERIC_NAMES = {"server", "app", "backend", "frontend", "service",
                   "worker", "api", "main", "core", "base"}
-
-_SKIP_TAGS = {"latest", "stable", "nightly", "edge", "develop", "main", "master",
-              "release", "snapshot", "beta", "test", "debug", "custom"}
 
 
 def _parse_image_name(image: str) -> str:
@@ -94,9 +92,14 @@ def _sort_key(s: str | None) -> tuple:
 
 
 def _derive_status(version: str, latest: str | None) -> str:
+    """
+    Compute display status from version strings.
+    Uses the canonical SKIP_TAGS from config (24 entries) so pinned detection
+    is consistent with the scheduler's version-check path.
+    """
     v = _norm(version)
     p = re.split(r"[.\-]", v)[0] if v else ""
-    if v in _SKIP_TAGS or p in _SKIP_TAGS:
+    if v in SKIP_TAGS or p in SKIP_TAGS:
         return "pinned"
     if not latest:
         return "unknown"
@@ -243,6 +246,71 @@ def import_compose():
         added.append(item["image"])
     db.session.commit()
     return jsonify({"added": added, "skipped": skipped}), 201
+
+
+@bp.post("/api/apps/import-json")
+def import_json():
+    """Restore apps from a Vigil JSON export.
+
+    Body: { "apps": [...], "replace": bool }
+
+    If replace=true, all existing TrackedApps are deleted first.
+    Returns: { "created": N, "updated": N, "skipped": N }
+    """
+    _, err = require_auth()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    apps_data = body.get("apps", [])
+    replace   = bool(body.get("replace", False))
+
+    if not isinstance(apps_data, list) or not apps_data:
+        return jsonify({"error": "No apps provided."}), 400
+
+    if replace:
+        TrackedApp.query.delete()
+        db.session.commit()
+
+    created = updated = skipped = 0
+    ALLOWED = {"image","name","version","status","category","notes",
+               "version_source_url","app_url","install_path","container_id",
+               "service_name","host_id","auto_update","icon_data","custom_icon",
+               "ignored_version","snooze_until"}
+
+    for item in apps_data:
+        if not isinstance(item, dict):
+            continue
+        image = (item.get("image") or "").strip()
+        if not image:
+            skipped += 1
+            continue
+
+        existing = TrackedApp.query.filter_by(image=image).first()
+        if existing and not replace:
+            # In merge mode, update mutable fields but keep status/version
+            for key in ("notes","category","version_source_url","app_url",
+                        "install_path","container_id","app_url","host_id",
+                        "auto_update","icon_data","custom_icon"):
+                if key in item and item[key] is not None:
+                    setattr(existing, key, item[key])
+            updated += 1
+        else:
+            app = TrackedApp(
+                image   = image,
+                name    = clamp((item.get("name") or "").strip(), "name") or image.split("/")[-1].split(":")[0],
+                version = (item.get("version") or "").strip() or "unknown",
+                status  = (item.get("status") or "unknown"),
+                category = item.get("category") or auto_categorize(image),
+            )
+            for key in ALLOWED - {"image","name","version","status","category"}:
+                if key in item and item[key] is not None:
+                    try: setattr(app, key, item[key])
+                    except Exception: pass
+            db.session.add(app)
+            created += 1
+
+    db.session.commit()
+    return jsonify({"created": created, "updated": updated, "skipped": skipped}), 201
 
 
 @bp.get("/api/apps/export")
@@ -436,8 +504,8 @@ def check_one_app(app_id):
     if err:
         return err
     from flask import current_app
-    from scheduler import _check_one
-    _check_one(app_id, current_app._get_current_object())
+    from services.version_checker import check_one
+    check_one(app_id, current_app._get_current_object())
     entry = TrackedApp.query.get(app_id)
     if not entry:
         return jsonify({"error": "Not found"}), 404
@@ -452,8 +520,8 @@ def trigger_check():
         return err
     from flask import current_app
     from scheduler import run_version_checks
-    data    = request.get_json(silent=True) or {}
-    app_ids = data.get("app_ids")
+    data      = request.get_json(silent=True) or {}
+    app_ids   = data.get("app_ids")
     flask_app = current_app._get_current_object()
     threading.Thread(
         target=run_version_checks,

@@ -45,7 +45,7 @@ BUILTIN_KEYWORDS = {
     "storage":      ["minio","seafile","syncthing","filebrowser","sftpgo","immich",
                      "photoprism","mealie","tandoor","grocy","freshrss","miniflux",
                      "nzbget","sabnzbd","nzbhydra","jackett","deluge","qbittorrent",
-                     "transmission","rtorrent","flaresolverr","bookstack"],
+                     "transmission","rtorrent","flaresolverr"],
     "security":     ["vaultwarden","bitwarden","authelia","authentik","keycloak","crowdsec",
                      "fail2ban","vault","openvpn","wazuh","portainer","wg-easy","passbolt",
                      "infisical","step-ca","semaphore"],

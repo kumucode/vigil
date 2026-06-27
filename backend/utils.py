@@ -3,7 +3,6 @@ utils.py — Shared helpers used across route modules.
 """
 
 import logging
-import re
 from datetime import datetime, timezone
 from functools import wraps
 
@@ -86,58 +85,3 @@ def require_str(
 
 def now_str() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def norm(s: str | None) -> str:
-    """Lowercase, strip leading 'v', collapse whitespace."""
-    if not s:
-        return ""
-    return re.sub(r"\s+", "", s.strip().lstrip("v").lower())
-
-
-def sort_key(s: str | None) -> tuple:
-    if not s:
-        return (0,)
-    parts = re.split(r"[.\-_]", norm(s))
-    result = []
-    for p in parts:
-        try:
-            result.append(int(p))
-        except ValueError:
-            result.append(p)
-    return tuple(result)
-
-
-def derive_status(version: str, latest: str | None) -> str:
-    """Simple status string from two version values."""
-    if not latest:
-        return "unknown"
-    if norm(version) == norm(latest):
-        return "up-to-date"
-    return "outdated"
-
-
-def parse_image_name(image: str) -> str:
-    """Extract the bare name from a full image string (no registry, no tag)."""
-    name = image.split("/")[-1]
-    name = name.split(":")[0]
-    return name
-
-
-def parse_compose_images(content: str) -> list[dict]:
-    """
-    Extract image strings from a docker-compose YAML.
-    Returns a list of dicts with 'name' and 'image' keys.
-    """
-    import yaml
-    try:
-        data = yaml.safe_load(content)
-    except yaml.YAMLError:
-        return []
-    results = []
-    services = (data or {}).get("services", {})
-    for svc_name, svc in (services or {}).items():
-        image = (svc or {}).get("image", "")
-        if image:
-            results.append({"name": svc_name, "image": image})
-    return results

@@ -1,0 +1,95 @@
+ARCHIVE B — vigil-v2_6.zip (actual: frontend-only P7 partial)
+==================================================================
+
+DIRECTORY STRUCTURE (frontend/src only — canonical path)
+
+/App.jsx
+/components
+/components/AccentColorPicker.jsx
+/components/AppIcon.jsx
+/components/CardMenu.jsx
+/components/CategoryPopover.jsx
+/components/ChannelPill.jsx
+/components/LogoSVG.jsx
+/components/Step2Body.jsx
+/components/Step3Poll.jsx
+/components/Tooltip.jsx
+/components/TzSelect.jsx
+/dialogs
+/dialogs/AddAppDialog.jsx
+/dialogs/HistoryDialog.jsx
+/dialogs/HostWizard.jsx
+/dialogs/ImportDialog.jsx
+/dialogs/OverrideDialog.jsx
+/dialogs/QuickEditDialogs.jsx
+/dialogs/SettingsDialog.jsx
+/dialogs/UpdateDialog.jsx
+/dialogs/UpdateLogDialog.jsx
+/hooks
+/hooks/useAuth.js
+/hooks/useSettings.js
+/hooks/useTheme.js
+/main.jsx
+/pages
+/pages/ChangePasswordScreen.jsx
+/pages/LoginScreen.jsx
+/services
+/services/api.js
+/services/categories.js
+/services/utils.js
+/{components,pages,dialogs,hooks,services}
+
+KEY FILE LINE COUNTS
+--------------------
+App.jsx (frontend/src):       1197
+hooks/useAuth.js:             127
+hooks/useTheme.js:            222
+hooks/useSettings.js:         132
+services/api.js:              88
+services/utils.js:            112
+services/categories.js:       30
+pages/LoginScreen.jsx:        141
+pages/ChangePasswordScreen.jsx: 59
+
+DIALOGS/
+  AddAppDialog.jsx: 59 lines
+  HistoryDialog.jsx: 29 lines
+  HostWizard.jsx: 346 lines
+  ImportDialog.jsx: 34 lines
+  OverrideDialog.jsx: 167 lines
+  QuickEditDialogs.jsx: 110 lines
+  SettingsDialog.jsx: 785 lines
+  UpdateDialog.jsx: 27 lines
+  UpdateLogDialog.jsx: 118 lines
+
+COMPONENTS/
+  AccentColorPicker.jsx: 183 lines
+  AppIcon.jsx: 96 lines
+  CardMenu.jsx: 261 lines
+  CategoryPopover.jsx: 79 lines
+  ChannelPill.jsx: 82 lines
+  LogoSVG.jsx: 20 lines
+  Step2Body.jsx: 124 lines
+  Step3Poll.jsx: 31 lines
+  Tooltip.jsx: 41 lines
+  TzSelect.jsx: 114 lines
+
+PACKAGE VERSIONS
+root package.json:
+  "version": "2.6.0",
+frontend/package.json:
+  "version": "2.3.0",
+
+BACKEND PRESENT: NO
+
+VALIDATION CHECKS
+App.jsx ≈1197:                1197 lines — PASS
+hooks/useAuth.js:             PRESENT
+hooks/useTheme.js:            PRESENT
+hooks/useSettings.js:         PRESENT
+dialogs/:                     PRESENT
+services/api.js:              PRESENT
+package.json version=2.6.0:   PASS
+
+NOTE: Archive B has duplicate src/ mirror at root — canonical is frontend/src/
+NOTE: {components,pages,dialogs,hooks,services} directory is packaging artefact (empty)

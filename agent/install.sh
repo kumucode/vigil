@@ -267,21 +267,77 @@ if [[ "$RUN_AS_ROOT" == "false" ]]; then
     echo ""
 fi
 
-# ── Token ─────────────────────────────────────────────────────────────────────
+# ── Vigil URL ─────────────────────────────────────────────────────────────────
 echo "  ┌─────────────────────────────────────────────────────────────────┐"
-echo "  │ TOKEN                                                           │"
-echo "  │ Go to Vigil → Settings → Agents → Add host.                    │"
-echo "  │ Vigil will generate a token for you. Paste it here.            │"
-echo "  │ It should look like: vigil-a3f9bc12d4e7...  (70 chars)         │"
+echo "  │ VIGIL URL                                                       │"
+echo "  │ The address where your Vigil is running.                        │"
+echo "  │   LAN example:  http://192.168.1.15:3000                       │"
+echo "  │   Domain:       https://vigil.yourdomain.com                   │"
 echo "  └─────────────────────────────────────────────────────────────────┘"
 while true; do
-    read -rp "  Token (from Vigil UI): " TOKEN
+    read -rp "  Vigil URL: " VIGIL_URL
+    VIGIL_URL="${VIGIL_URL%/}"
+    if [[ -z "$VIGIL_URL" ]]; then
+        warn "Vigil URL is required."
+    elif [[ ! "$VIGIL_URL" =~ ^https?:// ]]; then
+        warn "URL must start with http:// or https://"
+    else
+        break
+    fi
+done
+
+echo ""
+
+# ── 1. Install token ──────────────────────────────────────────────────────────
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ [1] INSTALL TOKEN                                               │"
+echo "  │ In Vigil → Settings → Agents → Add host → Step 2               │"
+echo "  │ copy value 1 (install token). It expires in 5 minutes.         │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+while true; do
+    read -rp "  Install token: " INSTALL_TOKEN
+    if [[ -z "$INSTALL_TOKEN" ]]; then
+        warn "Required."
+    elif [[ ! "$INSTALL_TOKEN" =~ ^install-[a-f0-9]{32}$ ]]; then
+        warn "Invalid format. Should start with 'install-' followed by 32 characters."
+    else
+        break
+    fi
+done
+
+echo ""
+
+# ── 2. Decryption key ─────────────────────────────────────────────────────────
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ [2] DECRYPTION KEY                                              │"
+echo "  │ Copy value 2 (decryption key) from the same Vigil screen.      │"
+echo "  │ This protects your certificates — it never leaves your machine. │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+while true; do
+    read -rp "  Decryption key: " DEC_KEY
+    if [[ -z "$DEC_KEY" ]]; then
+        warn "Required."
+    elif [[ ! "$DEC_KEY" =~ ^[a-f0-9]{32}$ ]]; then
+        warn "Invalid format. Should be 32 hex characters."
+    else
+        break
+    fi
+done
+
+echo ""
+
+# ── 3. Agent token ────────────────────────────────────────────────────────────
+echo "  ┌─────────────────────────────────────────────────────────────────┐"
+echo "  │ [3] AGENT TOKEN                                                 │"
+echo "  │ Copy value 3 (agent token) from the same Vigil screen.         │"
+echo "  │ This authorises every future request. Starts with 'vigil-'.    │"
+echo "  └─────────────────────────────────────────────────────────────────┘"
+while true; do
+    read -rp "  Agent token: " TOKEN
     if [[ -z "$TOKEN" ]]; then
-        warn "Token is required."
+        warn "Required."
     elif [[ ! "$TOKEN" =~ ^vigil-[a-f0-9]{64}$ ]]; then
-        warn "That doesn't look like a valid Vigil token."
-        warn "It should start with 'vigil-' followed by 64 hex characters."
-        warn "Please copy it again from Vigil → Settings → Agents → Add host."
+        warn "Invalid format. Should start with 'vigil-' followed by 64 characters."
     else
         break
     fi
@@ -399,23 +455,98 @@ fi
 info "Installing agent to ${AGENT_DIR}..."
 mkdir -p "$AGENT_DIR" "$CONFIG_DIR"
 
-if command -v curl &>/dev/null; then
-    curl -fsSL "https://raw.githubusercontent.com/youruser/vigil/main/agent/vigil-agent.py" \
-         -o "${AGENT_DIR}/vigil-agent.py" 2>/dev/null || \
-    cp "$(dirname "$0")/vigil-agent.py" "${AGENT_DIR}/vigil-agent.py" 2>/dev/null || \
-    error "Could not download vigil-agent.py. Run from the agent directory or check your internet connection."
+info "Downloading vigil-agent.py from Vigil..."
+if curl -fsSL "${VIGIL_URL}/agent/vigil-agent.py" \
+        -o "${AGENT_DIR}/vigil-agent.py" 2>/dev/null; then
+    success "Agent script downloaded from ${VIGIL_URL}"
 else
-    cp "$(dirname "$0")/vigil-agent.py" "${AGENT_DIR}/vigil-agent.py" 2>/dev/null || \
-    error "Could not copy vigil-agent.py — run from the agent directory."
+    error "Could not download vigil-agent.py from ${VIGIL_URL}/agent/vigil-agent.py — is Vigil reachable?"
 fi
 
 chmod +x "${AGENT_DIR}/vigil-agent.py"
 success "Agent script installed"
 
-# Install PyYAML (best-effort)
-python3 -m pip install --quiet pyyaml 2>/dev/null && \
-    success "PyYAML installed (better YAML validation)" || \
-    info "PyYAML not installed — basic YAML parsing will be used."
+# Install PyYAML (required for YAML validation before writes)
+python3 -m pip install --quiet pyyaml cryptography 2>/dev/null && \
+    success "PyYAML and cryptography installed" || \
+    warn "Could not install Python packages — run: pip install pyyaml cryptography"
+
+# ── Download and decrypt TLS certificates ────────────────────────────────────
+info "Contacting Vigil to download certificates..."
+
+PROVISION_RESPONSE=$(curl -s -X POST "${VIGIL_URL}/api/agent-provision" \
+    -H "Content-Type: application/json" \
+    -d "{\"install_token\": \"${INSTALL_TOKEN}\", \"dec_key\": \"${DEC_KEY}\"}" \
+    2>/dev/null)
+
+if [[ -z "$PROVISION_RESPONSE" ]]; then
+    error "Could not reach Vigil at ${VIGIL_URL}. Check the URL and try again."
+fi
+
+# Check for error in response
+PROVISION_ERROR=$(echo "$PROVISION_RESPONSE" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(d.get('error',''))
+" 2>/dev/null)
+
+if [[ -n "$PROVISION_ERROR" ]]; then
+    error "Vigil rejected the request: ${PROVISION_ERROR}"
+fi
+
+success "Encrypted certificate package received"
+
+# Decrypt the package and write cert files using Python
+info "Decrypting certificate package..."
+python3 << PYEOF
+import sys, json, base64, os
+from pathlib import Path
+
+response = json.loads('''${PROVISION_RESPONSE}''')
+blob    = response['encrypted_package']
+dec_key = '${DEC_KEY}'
+config_dir = '${CONFIG_DIR}'
+
+# PBKDF2 + AES-256-GCM decryption (mirrors ca.py decrypt_cert_package)
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+
+raw   = base64.b64decode(blob)
+salt  = raw[:16];  nonce = raw[16:28];  ct = raw[28:]
+kdf   = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100_000)
+key   = kdf.derive(dec_key.encode())
+payload = json.loads(AESGCM(key).decrypt(nonce, ct, None))
+
+# Write cert files with strict permissions
+Path(config_dir).mkdir(parents=True, exist_ok=True)
+
+ca_path    = Path(config_dir) / 'vigil-ca.crt'
+cert_path  = Path(config_dir) / 'agent.crt'
+key_path   = Path(config_dir) / 'agent.key'
+
+ca_path.write_text(payload['ca_cert'])
+ca_path.chmod(0o644)
+
+cert_path.write_text(payload['agent_cert'])
+cert_path.chmod(0o644)
+
+key_path.write_text(payload['agent_key'])
+key_path.chmod(0o600)
+
+print(response.get('fingerprint',''))
+PYEOF
+
+AGENT_FINGERPRINT=$(python3 -c "
+import json
+r = json.loads('''${PROVISION_RESPONSE}''')
+print(r.get('fingerprint',''))
+" 2>/dev/null)
+
+success "Certificates written to ${CONFIG_DIR}"
+success "  vigil-ca.crt — Vigil CA certificate (644)"
+success "  agent.crt    — Agent certificate (644)"
+success "  agent.key    — Agent private key (600 — owner read only)"
 
 # ── Write config ──────────────────────────────────────────────────────────────
 info "Writing config to ${CONFIG_DIR}/config.yml..."
@@ -433,9 +564,47 @@ chmod 600 "${CONFIG_DIR}/config.yml"
 
 if [[ "$RUN_AS_ROOT" == "false" ]]; then
     chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_DIR}" "${CONFIG_DIR}"
+    # cert files: key stays 600 owner-only, certs readable
+    chmod 644 "${CONFIG_DIR}/vigil-ca.crt" "${CONFIG_DIR}/agent.crt" 2>/dev/null || true
+    chmod 600 "${CONFIG_DIR}/agent.key" 2>/dev/null || true
 fi
 
 success "Config written (permissions: 600 — token is protected)"
+
+# ── Set up backup directory permissions ───────────────────────────────────────
+# vigil-agent needs to create .vigil-backups/ inside each app directory.
+# Pre-create it for each top-level subdirectory of ALLOWED_BASE so the user
+# doesn't hit a PermissionError on first update.
+if [[ "$RUN_AS_ROOT" == "false" ]]; then
+    info "Setting up file permissions under ${ALLOWED_BASE}..."
+    SETUP_COUNT=0
+    for APP_DIR in "${ALLOWED_BASE}"/*/; do
+        [[ -d "$APP_DIR" ]] || continue
+
+        # Create and own the backup directory
+        BACKUP_PATH="${APP_DIR}.vigil-backups"
+        mkdir -p "$BACKUP_PATH" 2>/dev/null || true
+        chown "${AGENT_USER}:${AGENT_USER}" "$BACKUP_PATH" 2>/dev/null || true
+
+        # Give vigil-agent ownership of the compose file so it can read and write it
+        for CF in "${APP_DIR}docker-compose.yml" "${APP_DIR}docker-compose.yaml"; do
+            if [[ -f "$CF" ]]; then
+                chown "${AGENT_USER}:${AGENT_USER}" "$CF" 2>/dev/null && \
+                    SETUP_COUNT=$((SETUP_COUNT + 1)) || \
+                    warn "Could not chown ${CF} — you may need to run: sudo chown ${AGENT_USER}:${AGENT_USER} ${CF}"
+            fi
+        done
+    done
+
+    if [[ $SETUP_COUNT -gt 0 ]]; then
+        success "Permissions set for ${SETUP_COUNT} compose file(s) under ${ALLOWED_BASE}"
+    else
+        warn "No compose files found yet under ${ALLOWED_BASE}."
+        warn "After adding new app directories, run:"
+        warn "  sudo chown ${AGENT_USER}:${AGENT_USER} /path/to/app/docker-compose.yml"
+        warn "  sudo mkdir -p /path/to/app/.vigil-backups && sudo chown ${AGENT_USER}:${AGENT_USER} /path/to/app/.vigil-backups"
+    fi
+fi
 
 # ── Create systemd service ────────────────────────────────────────────────────
 info "Creating systemd service..."
@@ -510,8 +679,54 @@ else
 fi
 echo "  Listening on : ${BIND_ADDR}:${AGENT_PORT}"
 echo "  Allowed path : ${ALLOWED_BASE}"
+echo "  TLS          : enabled — mutual TLS active"
 echo "  Config       : ${CONFIG_DIR}/config.yml"
 echo "  Logs         : journalctl -u ${SERVICE_NAME} -f"
 echo ""
-echo "  Next: click 'Test connection' in Vigil to verify."
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}  Your agent fingerprint — paste this in Vigil step 3:${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
+echo -e "  ${YELLOW}SHA256:${AGENT_FINGERPRINT}${NC}"
+echo ""
+echo "  In Vigil → Settings → Agents → Add host → step 3:"
+echo "  Paste the fingerprint above when prompted and click Compare."
+echo "  If it matches what Vigil shows, click 'Save host'."
+echo ""
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "  Firewall tip: to restrict access to Vigil only, run:"
+echo "    ufw allow from <your-vigil-ip> to any port ${AGENT_PORT}"
+echo "    ufw deny ${AGENT_PORT}"
+echo ""
+echo "  When you add a new app to this host later, run once:"
+echo "    sudo vigil-setup /path/to/app"
+echo ""
+
+# ── Install vigil-setup helper ────────────────────────────────────────────────
+cat > /usr/local/bin/vigil-setup << HELPER
+#!/bin/bash
+# vigil-setup <app-directory>
+# Grants vigil-agent read/write access to a docker-compose file and creates
+# the backup directory. Run this after adding a new app to this host.
+set -e
+APP_DIR="\${1%/}"
+if [[ -z "\$APP_DIR" ]] || [[ ! -d "\$APP_DIR" ]]; then
+    echo "Usage: sudo vigil-setup /path/to/app"
+    echo "  e.g. sudo vigil-setup /home/jellyfin"
+    exit 1
+fi
+AGENT_USER="${AGENT_USER}"
+echo "Setting up \$APP_DIR for vigil-agent..."
+mkdir -p "\${APP_DIR}/.vigil-backups"
+chown "\${AGENT_USER}:\${AGENT_USER}" "\${APP_DIR}/.vigil-backups"
+for CF in "\${APP_DIR}/docker-compose.yml" "\${APP_DIR}/docker-compose.yaml"; do
+    if [[ -f "\$CF" ]]; then
+        chown "\${AGENT_USER}:\${AGENT_USER}" "\$CF"
+        echo "  [OK] \$CF"
+    fi
+done
+echo "Done. vigil-agent can now read/write compose files in \$APP_DIR"
+HELPER
+chmod +x /usr/local/bin/vigil-setup
+success "Installed vigil-setup helper to /usr/local/bin/vigil-setup"

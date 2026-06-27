@@ -41,18 +41,41 @@ We'd rather tell you the truth than let you make uninformed decisions about what
 
 We know about these. They are documented here so you can make informed decisions, not discovered later.
 
-### 1. Agent communication is plain HTTP
+### 1. ~~Agent communication is plain HTTP~~ — Fixed in v2.3
 
-Traffic between Vigil and the agent travels over HTTP, not HTTPS. This means:
+As of v2.3, all traffic between Vigil and its agents uses **mutual TLS** — both sides present certificates signed by Vigil's Private CA, and both sides verify each other. The token travels inside the encrypted channel. A packet capture on the network shows only TLS handshakes and ciphertext.
 
-- The agent token is sent in plaintext on every request.
-- Anyone on the same network segment running a packet capture can intercept it.
-- On a trusted home LAN behind a router, this risk is low.
-- On any network you don't fully control, this is a real concern.
+**How it works:**
 
-**What to do:** Keep Vigil and its agents on a trusted LAN or VLAN. Do not expose port 7777 to the internet. If you need agents on a remote host, use a VPN tunnel (WireGuard, Tailscale) between the two machines before connecting them.
+Vigil generates a Private CA on first start (`vigil-ca.key` + `vigil-ca.crt`), stored in the data volume. The CA private key never leaves Vigil. When a new agent host is added, Vigil issues a certificate for that specific agent, signed by its CA. The agent installer downloads an encrypted package containing three files — the CA cert, the agent cert, and the agent private key — using a short-lived install token (5 minutes, single-use) and a separate decryption key that never travels over the network.
 
-**Roadmap:** Mutual TLS between Vigil and agents (planned for v2.1). The agent will generate a self-signed certificate on install; Vigil will pin the fingerprint when adding the host. No external CA required, no complexity for users.
+**Certificate delivery security:**
+
+Two secrets are required to decrypt the certificate package:
+
+- **Install token** — shown in the Vigil wizard, travels in the installer request (single-use, 5 minutes)
+- **Decryption key** — shown in the Vigil wizard, never transmitted — goes clipboard → terminal only
+
+An interceptor who captures the network request gets an AES-256-GCM encrypted blob. Without the decryption key — which never left the user's clipboard — it is useless.
+
+**Fingerprint verification:**
+
+After the agent installs, its certificate fingerprint is shown in the terminal. The Vigil wizard shows the same fingerprint (fetched from the agent). The user compares them side-by-side — matching segments are highlighted green, mismatching ones red. This is the TOFU (Trust On First Use) model — the same approach SSH uses for host key verification. Once confirmed, all future connections are verified automatically against the pinned fingerprint.
+
+**Backwards compatibility:**
+
+Existing hosts added before v2.3 have no certificate. They continue to work over plain HTTP with a visible **⚠ Upgrade to TLS** badge in the Agents settings. Clicking it re-runs the provisioning wizard for that host.
+
+**Remaining considerations:**
+
+- The certificate lifetime is 10 years. This avoids expiry headaches for homelab users. Renewal is a future improvement.
+- The TOFU window (seconds between installer running and user confirming the fingerprint in Vigil) is the moment of lowest security. On a LAN this risk is negligible. On a VPS without a VPN, a sophisticated attacker could theoretically intercept and substitute a certificate during this window.
+- **For VPS deployments:** establish a VPN (WireGuard, Tailscale) between Vigil and the agent before running the installer. The certificate exchange then happens inside the encrypted tunnel — eliminating the TOFU window risk entirely.
+
+**What to do:**
+- LAN deployments: proceed as normal. The default setup is secure.
+- VPS deployments: set up a VPN first, then add the agent through it. Keep port 7777 restricted to Vigil's IP only with your firewall.
+- Always verify the fingerprint in step 3 of the wizard. If the fingerprints don't match — stop and investigate before proceeding.
 
 ---
 
@@ -175,7 +198,8 @@ To be completely transparent:
 - Docker images are not scanned automatically in CI for base image vulnerabilities.
 - Python backend dependencies are pinned to exact versions but not yet verified with `--require-hashes`. Frontend dependencies are pinned to exact versions in `package.json`.
 - No penetration testing has been performed. The findings in this document are from a self-conducted code review.
-- Agent communication is still plain HTTP (token travels in plaintext on the LAN). Mutual TLS is planned for v2.3.
+- Agent certificate lifetime is 10 years — automatic renewal is not yet implemented.
+- The TOFU window during initial certificate provisioning carries residual risk on VPS deployments without a VPN. A VPN eliminates it.
 
 We are a small open-source project. We document what we know, fix issues promptly, and tell you the truth. We are not claiming enterprise-grade security — if that's what you need, this is probably not the right tool. If homelab-grade, honestly documented security is enough for your use case, Vigil tries hard to get that right.
 
@@ -197,6 +221,16 @@ We will acknowledge within 48 hours and aim to release a fix within 14 days for 
 
 | Version | Change |
 |---|---|
+| v2.3 | Mutual TLS for all Vigil ↔ agent communication — Private CA model, both sides authenticate |
+| v2.3 | Private CA generated on first Vigil start — CA private key never leaves the data volume |
+| v2.3 | Per-agent certificates issued and signed by Vigil's CA — 2048-bit RSA, 10-year lifetime |
+| v2.3 | Certificate package encrypted with AES-256-GCM + PBKDF2 before delivery — safe over HTTP |
+| v2.3 | Install token: single-use, 5-minute expiry, bcrypt-hashed in DB — never stored in plaintext |
+| v2.3 | Decryption key never transmitted — clipboard only, derived via PBKDF2-HMAC-SHA256 |
+| v2.3 | Fingerprint comparison UI — user verifies agent identity with per-segment mismatch highlighting |
+| v2.3 | Public IP auto-detection — wizard shows VPN recommendation for non-RFC-1918 addresses |
+| v2.3 | Backwards compatible — existing HTTP hosts get visible upgrade prompt, no forced breakage |
+| v2.3 | `install.sh` served directly from Vigil — no third-party download needed |
 | v2.2 | Agent tokens encrypted at rest with AES-256-GCM — key derived from `SECRET_KEY`, never stored |
 | v2.2 | Session idle timeout — configurable via `SESSION_LIFETIME_HOURS` env var (default 12h) |
 | v2.2 | Frontend dependencies pinned to exact versions — no `^` or `~` ranges |
