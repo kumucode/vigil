@@ -19,7 +19,7 @@ Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
 ---
 
-> **⚠️ Alpha release — vv1.0**
+> **⚠️ Alpha release — v1.0**
 >
 > Vigil is functional and has been tested in real self-hosted environments,
 > but it is still early software. You may encounter rough edges. If you do,
@@ -285,22 +285,22 @@ npm run dev
 ## Screenshots
 
 ### Dark Mode
-![Dashboard Dark](docs/screenshots/Dashboard-dark-mode.png)
+![Dashboard Dark](docs/screenshots/Dashboard-dark-mode-midnight.png)
 
-### Light Mode
-![Dashboard Light](docs/screenshots/Dashboard-light-mode.png)
+### Dark Mode 2
+![Dashboard Dark2](docs/screenshots/Dashboard-dark-mode-carbon.png)
+
+### Light Mode 
+![Dashboard Light](docs/screenshots/Dashboardlight-mode-vintage.png)
 
 ### List View
-![List View](docs/screenshots/List-view.png)
+![List View](docs/screenshots/Compact-view.png)
 
 ### Settings
-![Settings](docs/screenshots/Settings.png)
-
-### Table View
-![Table View](docs/screenshots/Table-view.png)
+![Settings](docs/screenshots/Setting-branding.png)
 
 ### Telegram
-![Telegram](docs/screenshots/Telegram-menu.png)
+![Telegram](docs/screenshots/Settings-telegram.png)
 
 ---
 
