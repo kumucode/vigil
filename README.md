@@ -8,7 +8,7 @@
 
 Self-hosted · Dark UI · 2FA · Telegram alerts · Zero cloud dependency
 
-[![Version](https://img.shields.io/badge/version-2.3-e0a83c.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.7-e0a83c.svg)](./CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-alpha-e05c5c.svg)](#alpha-notice)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5865F2.svg)](./LICENSE)
 [![Docker Compose](https://img.shields.io/badge/deploy-docker%20compose-2496ED.svg)](./docker-compose.yml)
