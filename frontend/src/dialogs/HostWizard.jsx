@@ -427,7 +427,7 @@ export default function HostWizard({
                     </div>
                     {[
                       ["Find an app card", "e.g. Bookstack, Jellyfin, or any service on " + activeHost.name],
-                      ["Click "Edit this card"", "Opens the card editor"],
+                      ['Click "Edit this card"', "Opens the card editor"],
                       ["Set Remote host → " + activeHost.name, "Links the card to this host"],
                       ["Set Install path", "e.g. /home/bookstack/"],
                       ["Set Service name", "e.g. bookstack (must match the compose service key)"],
