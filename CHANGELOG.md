@@ -4,7 +4,150 @@ All notable changes to Vigil will be documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [2.4] — unreleased
+## [2.7] — 2026-06-25
+
+### Added — Design System & Appearance
+
+This release replaces all ad-hoc component colours with a centralized semantic
+design-token architecture. Every colour in the application now flows through a
+single `C` object produced by `useTheme.js`. No component carries local colour
+overrides.
+
+**Theme presets**
+- Five built-in themes: **Warm Vintage** · **Nordic** · **Slate** · **Carbon** · **Midnight**
+- Each preset defines its own complete token set: surfaces, borders, text, status,
+  buttons, header, icon actions, glow, scrollbars
+- `darkMode` is automatically synced when switching between light and dark presets
+- `changePreset()` handles mode switch + accent update atomically; no reload needed
+
+**Adaptive logo**
+- Replaced the base64 PNG default logo with an SVG shield+eye icon in `LogoSVG.jsx`
+- Uses `currentColor` throughout — inherits the active accent from the parent wrapper
+- Works at any size (topbar: 52px, login screen: 144px)
+
+**Header**
+- New `C.header` token: a distinct surface darker than the page background
+- `box-shadow` for depth separation; `min-height:72px` + `padding-block:10px` instead
+  of `height:72px` so the bar never clips content
+
+**Button system**
+- Five button roles, all token-driven: **primary/save** · **test** · **close** · **danger** · **success**
+- Light themes use `2px solid` borders; dark themes `1px solid` (via `_btnBW`)
+- Warm Vintage: rgba translucent fills (0.75 opacity) with matching solid border
+- Nordic: solid fills with specific hover lightening
+- Close buttons: Nordic at 70% element opacity; hover always fully opaque
+- New `.btn-success` class (confirm / create / deploy actions)
+- `btnTestHoverText` token so hover text colour can differ from default
+
+**Status colour normalization**
+- Single `statusMap` object is the source of truth for all five statuses across
+  Grid cards, Compact Table rows, and Dashboard stat cards
+- Dashboard stat cards previously hardcoded `#8FA88C` (outdated green) and
+  `#e05c5c` etc; now read `C.statusMap[status].fg` exclusively
+- Grid status badge previously derived from a separate `STATUS_COLORS` constant;
+  now uses `statusMap.bg / .fg / .border` for full consistency with the table
+- `STATUS_COLORS` import removed from `App.jsx`
+
+**Icon actions**
+- `.ic-action` default colour is now `C.iconAction` = accent at 55% opacity
+- Hover is full `C.accent`; never defaults to gray
+- `.ic-action.deploy` and `.ic-action.del` retain their own semantic colours
+
+**Typography & readability**
+- Body: `14px`, `font-weight:450`, `line-height:1.55`
+- Card names: `15.5px`; version values: `14.5px`; list/table names: `14–15px`
+- Form labels: `14px` at `opacity:0.92`; hints: `opacity:0.85`
+- Input height `+6px` (min-height 54px); textarea `+8px`; buttons vertical padding `+4px`
+- All tabs (`.stab`): `min-width:fit-content`, `font-size:13px`, `opacity:0.78`
+- Status badges (`.sb`): `11px`, `white-space:nowrap`
+
+**Zero-clip policy**
+- Global `*,*::before,*::after{box-sizing:border-box}` rule added
+- Settings sidebar `.sw-nav`: `line-height:2` → `1.65`, `font-size:16px` → `18px`,
+  `display:block` → `display:flex; align-items:center`, `padding-bottom:22px`
+  — eliminates descender clipping on "g"/"y" in "Telegram", "Agents", "Branding"
+- Compact table cells: `height:56px` → `min-height:56px; overflow:visible`
+- Table headers: `height:44px` → `min-height:44px`
+- Category tags (`.tag`): `overflow:visible` — no unintentional ellipsis
+- HostWizard step tabs: `padding:7px 0` → `padding:12px 6px`, `font-size:11` → `12`,
+  `line-height:1.6`, `overflow:visible` — fixes "Verify" / "agent" descender clip
+
+**Topbar layout**
+- New button order: Check Updates → Import YML → Export → Import JSON →
+  Grid → Compact → Dark mode → Settings → Logout → **Add Application**
+- "Add Application" moved to the far right, after Logout, separated by a divider
+- Import/Export controls moved before the view-toggle group
+
+**Utility helpers**
+- `_lighten(hex, frac)` and `_darken(hex, frac)` added to `services/utils.js`
+  for computed solid button colours
+
+### Changed
+- `services/designTokens.js` — removed duplicate `FOCUS_RING` and `BTN` exports;
+  added `TYPE` scale and tightened `SPACE` / `RADIUS` usage
+- Username / form-action buttons (`btn-g.btn-warn-hover`) — universal steel blue
+  `#3B6EA8` on hover across all themes (was amber/gold)
+- Warm Vintage accent base updated to `#964B07` (consistent with button border spec)
+- Nordic Save button: solid `#3D4758`; hover 15% lighter
+
+### Internal
+- `App.jsx`: `4,515` lines → `~1,680` lines (P7 frontend decomposition complete)
+- All dialogs extracted to `src/dialogs/`
+- Auth and settings state extracted to `src/hooks/useAuth.js`, `src/hooks/useSettings.js`
+- Theme system centralised in `src/hooks/useTheme.js` (THEME_PRESETS registry exported)
+- `src/pages/LoginScreen.jsx` and `ChangePasswordScreen.jsx` extracted
+- `src/services/api.js` — typed API client; `fetch()` calls removed from App.jsx
+
+---
+
+## [2.6] — 2026-05-20
+
+### Added — Frontend decomposition (P7)
+
+`App.jsx` refactored from a 4,515-line monolith to a composable component tree.
+
+**New files**
+- `src/hooks/useTheme.js` — theme state (dark mode, accent, preset, view mode)
+- `src/hooks/useAuth.js` — authentication state (login, logout, TOTP, backup codes)
+- `src/hooks/useSettings.js` — settings state and save logic
+- `src/services/api.js` — typed `api(path, options)` client replacing inline `fetch()`
+- `src/services/designTokens.js` — design constants (SPACE, RADIUS, TYPE, STATUS_LABEL)
+- `src/services/utils.js` — shared helpers: `_hexToRgba`, `_contrastOn`, `copyText`,
+  `parseImage`, `stripBlackBackground`
+- `src/services/categories.js` — category colour utilities
+- `src/components/LogoSVG.jsx` — logo + LogoutIcon
+- `src/components/Icon.jsx` — icon library (sun, moon, settings, refresh, …)
+- `src/components/CardMenu.jsx` — card action dropdown (extracted from App.jsx)
+- `src/components/AccentColorPicker.jsx`
+- `src/components/AppIcon.jsx`
+- `src/components/CategoryPopover.jsx`
+- `src/components/ChannelPill.jsx`
+- `src/components/Step2Body.jsx`
+- `src/components/Step3Poll.jsx`
+- `src/components/Tooltip.jsx`
+- `src/components/TzSelect.jsx`
+- `src/dialogs/SettingsDialog.jsx` — full settings workspace (837 lines extracted)
+- `src/dialogs/HostWizard.jsx` — 4-step agent setup wizard
+- `src/dialogs/AddAppDialog.jsx`
+- `src/dialogs/HistoryDialog.jsx`
+- `src/dialogs/ImportDialog.jsx`
+- `src/dialogs/ImportAppsDialog.jsx`
+- `src/dialogs/OverrideDialog.jsx`
+- `src/dialogs/QuickEditDialogs.jsx`
+- `src/dialogs/UpdateDialog.jsx`
+- `src/dialogs/UpdateLogDialog.jsx`
+- `src/pages/LoginScreen.jsx`
+- `src/pages/ChangePasswordScreen.jsx`
+
+### Changed
+- `App.jsx` reduced to shell: routing between auth screens, topbar, toolbar, and
+  the main grid/table views. All hook state wired via explicit props
+- `submitChangePw` and `submitChangeUsername` moved to `api.js`
+  (`postChangePw`, `postChangeUser`)
+- No user-visible behaviour changes
+
+
+## [2.4] — 2026-02-15
 
 ### Fixed
 - Check interval configured in the UI is now preserved across container restarts.
